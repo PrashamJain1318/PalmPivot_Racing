@@ -22,6 +22,7 @@ import SoundController from '@/game/systems/SoundController';
 import GarageCustomizer from '@/components/GarageCustomizer';
 import GestureCalibrator from '@/components/GestureCalibrator';
 import WebcamDetector from '@/components/WebcamDetector';
+import LoadingScreen from '@/components/hud/LoadingScreen';
 
 export default function Home() {
   // Store States
@@ -1083,22 +1084,7 @@ export default function Home() {
 
       {/* 4.5. TRACK LOADING STATE OVERLAY */}
       {status === 'countdown' && !trackLoaded && (
-        <div className="absolute inset-0 z-48 flex flex-col items-center justify-center bg-slate-950 backdrop-blur-md pointer-events-auto">
-          <div className="flex flex-col items-center justify-center gap-6 max-w-sm text-center">
-            {/* Glassmorphic spinner */}
-            <div className="relative w-16 h-16 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin shadow-[0_0_15px_rgba(6,182,212,0.4)]" />
-            <div>
-              <span className="text-[10px] font-black tracking-widest text-cyan-400 animate-pulse font-mono">SYNCHRONIZING WORLD METRICS</span>
-              <h2 className="text-2xl font-black italic text-white uppercase tracking-wide mt-1 font-mono">WARPING CIRCUIT</h2>
-              <p className="text-white/40 text-[9px] font-mono mt-3 leading-relaxed">
-                Loading geometry matrices, high-fidelity materials, barriers, environment details, and collision meshes...
-              </p>
-            </div>
-            <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
-              <div className="h-full bg-cyan-400 rounded-full animate-[loading_1.5s_infinite]" style={{ width: '45%' }} />
-            </div>
-          </div>
-        </div>
+        <LoadingScreen trackId={currentTrack} weather={weather} />
       )}
 
       {/* 4. RACE START COUNTDOWN OVERLAY */}
