@@ -17,6 +17,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
 // @ts-ignore
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass';
+import PerformanceDashboard from '@/components/PerformanceDashboard';
 
 // ─── Error Boundary: prevents any child error from collapsing the canvas ───
 interface ErrorBoundaryState { hasError: boolean; error?: string }
@@ -375,6 +376,7 @@ export default function GameCanvas() {
         {/* Renderer configuration — runs inside Canvas */}
         <RendererConfig />
         <PostProcessingEffect />
+        <PerformanceDashboard />
 
         {/* Confirms scene graph is alive even if all content fails */}
         <SceneOriginMarker />

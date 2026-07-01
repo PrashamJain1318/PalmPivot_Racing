@@ -226,9 +226,15 @@ export default function WebcamDetector() {
     let lastTime = performance.now();
     let frames = 0;
     let fps = 0;
+    let isProcessing = false;
 
     const processFrame = async () => {
       if (!active || !videoRef.current || !handsDetector) return;
+
+      if (isProcessing) {
+        requestFrameId = requestAnimationFrame(processFrame);
+        return;
+      }
 
       if (videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
         const timeNow = performance.now();
@@ -240,15 +246,19 @@ export default function WebcamDetector() {
         }
 
         try {
+          isProcessing = true;
           sendTimeRef.current = performance.now();
           await handsDetector.send({ image: videoRef.current });
-        } catch (e) {}
+        } catch (e) {
+          isProcessing = false;
+        }
       }
 
       requestFrameId = requestAnimationFrame(processFrame);
     };
 
     const onResults = (results: any) => {
+      isProcessing = false;
       if (!canvasRef.current || !active) return;
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
