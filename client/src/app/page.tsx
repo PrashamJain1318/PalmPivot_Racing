@@ -64,7 +64,8 @@ export default function Home() {
   const [triggerCameraPrompt, setTriggerCameraPrompt] = useState(false);
 
   // Photo Mode states
-  const [photoModeActive, setPhotoModeActive] = useState(false);
+  const photoModeActive = useGameStore((s) => s.photoModeActive);
+  const setPhotoModeActive = useGameStore((s) => s.setPhotoModeActive);
   const [activeFilter, setActiveFilter] = useState<'none' | 'cyberpunk' | 'vintage' | 'monochrome'>('none');
   const [savedPhotos, setSavedPhotos] = useState<string[]>([]);
   const [showGallery, setShowGallery] = useState(false);

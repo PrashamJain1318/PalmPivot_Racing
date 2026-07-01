@@ -21,15 +21,27 @@ export default function VehicleController({
 }: VehicleControllerProps) {
   const rbRef = useRef<RapierRigidBody>(null);
   const chassisRef = useRef<THREE.Group>(null);
-  
+
+  // Visual Wheel Refs
+  const frontLeftWheelRef = useRef<THREE.Group>(null);
+  const frontRightWheelRef = useRef<THREE.Group>(null);
+  const rearLeftWheelRef = useRef<THREE.Group>(null);
+  const rearRightWheelRef = useRef<THREE.Group>(null);
+
   const { camera } = useThree();
   const { rapier, world } = useRapier();
 
-  // Replay trackside camera tracking refs
+  // TV Replay camera tracking refs
   const lastCameraSwitchRef = useRef(0);
-  const replayCameraWpIndexRef = useRef(0);
   const replayCameraPosRef = useRef(new THREE.Vector3());
+  
+  // Custom refs for smoothing steering and wheel roll
+  const steerAngleRef = useRef(0);
+  const wheelRollRef = useRef(0);
   const displaySpeedRef = useRef(0);
+  const stuckTimeRef = useRef(0);
+  const flippedTimeRef = useRef(0);
+
   const speedLinesRef = useRef<THREE.Group>(null);
 
   // Zustand state selectors
@@ -56,7 +68,8 @@ export default function VehicleController({
     shieldActive,
     magnetActive,
     health,
-    nitroActive
+    nitroActive,
+    photoModeActive
   } = useGameStore();
 
   const currentTrack = useGameStore((s) => s.currentTrack);
@@ -163,7 +176,6 @@ export default function VehicleController({
     const points = getProceduralTrackPoints(currentTrack || 'track_1');
     waypointsRef.current = points;
     if (points.length >= 2) {
-      // Finish line is at the midpoint of waypoints 0-1
       const fCenter = new THREE.Vector3(
         (points[0].x + points[1].x) / 2,
         (points[0].y + points[1].y) / 2,
@@ -184,9 +196,61 @@ export default function VehicleController({
         const translation = rbRef.current.translation();
         onCollision(force, [translation.x, translation.y, translation.z]);
       }
-    } catch (e) {
-      // Catch empty rapier impulses
+    } catch (e) {}
+  };
+
+  // Helper trigger to reset player to the last valid checkpoint (closest waypoint)
+  const triggerCheckpointRecovery = () => {
+    if (!rbRef.current) return;
+    const rb = rbRef.current;
+    const translation = rb.translation();
+    const carPos = new THREE.Vector3(translation.x, translation.y, translation.z);
+
+    let nearestDist = Infinity;
+    let nearestPt = new THREE.Vector3(0, 1.2, 0);
+    let nearestIdx = 0;
+    
+    const points = waypointsRef.current;
+    for (let i = 0; i < points.length; i++) {
+      const wp = points[i];
+      const d = carPos.distanceTo(wp);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearestPt = wp;
+        nearestIdx = i;
+      }
     }
+
+    rb.setTranslation({ x: nearestPt.x, y: nearestPt.y + 0.75, z: nearestPt.z }, true);
+    
+    if (points.length >= 2) {
+      const nextWp = points[(nearestIdx + 1) % points.length];
+      const forward = new THREE.Vector3().subVectors(nextWp, nearestPt).normalize();
+      const angle = Math.atan2(forward.x, forward.z);
+      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+      rb.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
+    } else {
+      rb.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+    }
+    
+    rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    rb.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    
+    stuckTimeRef.current = 0;
+    flippedTimeRef.current = 0;
+    steerAngleRef.current = 0;
+
+    statsRef.current.speed = 0;
+    statsRef.current.rpm = 800;
+    statsRef.current.isDrifting = false;
+    statsRef.current.combo = 0;
+
+    updateVehicleStats({
+      speed: 0,
+      rpm: 800,
+      isDrifting: false,
+      combo: 0
+    });
   };
 
   useFrame((state, delta) => {
@@ -195,6 +259,7 @@ export default function VehicleController({
     const rb = rbRef.current;
     const translation = rb.translation();
     const rotation = rb.rotation();
+    const carQuat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
 
     // Lock vehicle physics if game is paused, finished, or during loading/countdown
     if (status !== 'playing') {
@@ -240,69 +305,57 @@ export default function VehicleController({
       return;
     }
 
-    // 1. Auto-Respawn if fallen off elevated grid
+    // 1. Auto-Respawn if fallen below map boundaries
     if (translation.y < -10.0) {
-      // Smart respawn: find nearest waypoint
-      const carPos = new THREE.Vector3(translation.x, translation.y, translation.z);
-      let nearestDist = Infinity;
-      let nearestPt = new THREE.Vector3(0, 1.2, 0);
-      let nearestIdx = 0;
-      
-      const points = waypointsRef.current;
-      for (let i = 0; i < points.length; i++) {
-        const wp = points[i];
-        const d = carPos.distanceTo(wp);
-        if (d < nearestDist) {
-          nearestDist = d;
-          nearestPt = wp;
-          nearestIdx = i;
-        }
-      }
-
-      rb.setTranslation({ x: nearestPt.x, y: nearestPt.y + 1.5, z: nearestPt.z }, true);
-      
-      // Face forward along the track direction at that waypoint
-      if (points.length >= 2) {
-        const nextWp = points[(nearestIdx + 1) % points.length];
-        const forward = new THREE.Vector3().subVectors(nextWp, nearestPt).normalize();
-        const angle = Math.atan2(forward.x, forward.z);
-        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
-        rb.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
-      } else {
-        rb.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
-      }
-      
-      rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
-      rb.setAngvel({ x: 0, y: 0, z: 0 }, true);
-      
-      statsRef.current.speed = 0;
-      statsRef.current.rpm = 800;
-      statsRef.current.isDrifting = false;
-      statsRef.current.combo = 0;
-      
-      updateVehicleStats({
-        speed: 0,
-        rpm: 800,
-        isDrifting: false,
-        combo: 0
-      });
+      triggerCheckpointRecovery();
       return;
     }
 
-    // 2. Convert Rapier quaternion to Three.js Object
-    const carQuat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
-    
-    // Get directions
-    forwardVec.set(0, 0, -1).applyQuaternion(carQuat).normalize();
-    rightVec.set(1, 0, 0).applyQuaternion(carQuat).normalize();
+    // 2. Read Euler rotations for Roll & Pitch stabilization (prevent flips)
+    const euler = new THREE.Euler().setFromQuaternion(carQuat, 'YXZ');
+    const angVel = rb.angvel();
 
-    // Get linear velocity and speed in km/h
+    // Stuck check: If car speed is near zero during race play, start stuck recovery timer
     const linVel = rb.linvel();
     velocityVec.set(linVel.x, linVel.y, linVel.z);
-    
+    forwardVec.set(0, 0, -1).applyQuaternion(carQuat).normalize();
+    rightVec.set(1, 0, 0).applyQuaternion(carQuat).normalize();
     const rawSpeedKmh = Math.max(0, velocityVec.dot(forwardVec) * 3.6);
-    // Smooth the speedometer readout (low-pass filter) to eliminate high frequency frame-to-frame fluctuations
-    displaySpeedRef.current = THREE.MathUtils.lerp(displaySpeedRef.current, rawSpeedKmh, 0.12);
+    
+    if (rawSpeedKmh < 4) {
+      stuckTimeRef.current += delta;
+      if (stuckTimeRef.current > 3.0) {
+        triggerCheckpointRecovery();
+        return;
+      }
+    } else {
+      stuckTimeRef.current = 0;
+    }
+
+    // Flipped check: if rollover tilt > 55 degrees, increment flipped timer
+    const isFlipped = Math.abs(euler.z) > 1.0 || Math.abs(euler.x) > 1.0;
+    if (isFlipped) {
+      flippedTimeRef.current += delta;
+      if (flippedTimeRef.current > 1.5) {
+        triggerCheckpointRecovery();
+        return;
+      }
+    } else {
+      flippedTimeRef.current = 0;
+    }
+
+    // Active Roll & Pitch Stabilizer (arcade spring torques)
+    const pitchCorrection = -euler.x * 24.0;
+    const rollCorrection = -euler.z * 24.0;
+
+    rb.setAngvel({
+      x: THREE.MathUtils.lerp(angVel.x, pitchCorrection, 0.15),
+      y: angVel.y,
+      z: THREE.MathUtils.lerp(angVel.z, rollCorrection, 0.15)
+    }, true);
+
+    // 3. Speedometer velocity calculations
+    displaySpeedRef.current = THREE.MathUtils.lerp(displaySpeedRef.current, rawSpeedKmh, 0.08);
     const speedKmh = Math.round(displaySpeedRef.current);
     statsRef.current.speed = speedKmh;
 
@@ -311,12 +364,11 @@ export default function VehicleController({
       statsRef.current.raceTime += delta * 1000;
     }
 
-    // ─── Arcade Physics & Controls Redesign ───
-    // Steering is the only manual control (either from keys or webcam)
+    // 4. Progressive speed-sensitive steering
     const kbLeft = debugKeyboard && (keysPressed.current.KeyA || keysPressed.current.ArrowLeft);
     const kbRight = debugKeyboard && (keysPressed.current.KeyD || keysPressed.current.ArrowRight);
     
-    let steerInput = steeringAngle * gestureSensitivity;
+    let steerInput = steeringAngle;
     if (debugKeyboard && (kbLeft || kbRight)) {
       steerInput = kbLeft ? -1.0 : 1.0;
       useGameStore.getState().updateGestureInput({
@@ -326,55 +378,57 @@ export default function VehicleController({
       });
     }
 
-    // A. Fuel Consumption
+    // High speed lock reduction: decrease maximum steer angle at higher speeds to improve stability
+    const maxSteerLimit = 0.52 * Math.max(0.25, 1.0 - speedKmh / 280);
+    const targetSteerAngle = steerInput * maxSteerLimit;
+
+    // Smooth Progressive steer response (returns to neutral smoothly when hands return to center)
+    steerAngleRef.current = THREE.MathUtils.lerp(steerAngleRef.current, targetSteerAngle, 0.14);
+
+    // 5. Fuel Drain logic
     let currentFuel = fuel;
     if (status === 'playing') {
-      currentFuel = Math.max(0, fuel - delta * 2.8); // Drains completely in ~35 seconds
+      currentFuel = Math.max(0, fuel - delta * 2.8);
       if (currentFuel <= 0 && speedKmh === 0) {
         setStatus('gameover');
       }
     }
 
-    // B. Detect collisions / crashes via health drop
+    // Detect collisions / resets via health drops
     if (health < prevHealthRef.current) {
-      // Impact crash: reset clean driving timer to zero to drop max cruising speed
       cleanDrivingTimeRef.current = 0;
       prevHealthRef.current = health;
     } else if (status === 'playing' && health > prevHealthRef.current) {
-      // Health restored via repair kit
       prevHealthRef.current = health;
     }
 
-    // C. Increment clean driving time
     if (status === 'playing' && currentFuel > 0 && health > 0) {
       cleanDrivingTimeRef.current += delta;
     }
 
-    // D. Dynamic speed target builder
+    // Cruising speeds target
     let targetSpeed = 0;
     if (currentFuel <= 0 || health <= 0) {
-      targetSpeed = 0; // Engine cutoff
+      targetSpeed = 0;
     } else if (nitroActive) {
-      targetSpeed = 320; // Turbo boost pad / Nitro pickup active
+      targetSpeed = 320;
     } else {
-      // Cruising speed starts at 160 km/h and slowly climbs to 240 km/h top speed
       targetSpeed = 160 + Math.min(80, cleanDrivingTimeRef.current * 10);
     }
 
-    // E. Automated Throttle & Brake force application
+    // Automatic acceleration and braking values
     let throttle = 0;
     if (status === 'playing') {
       if (speedKmh < targetSpeed) {
-        throttle = 1.2; // Accelerate automatically
+        throttle = 1.2;
       } else if (speedKmh > targetSpeed + 5) {
-        throttle = -0.6; // Brake automatically to slow down
+        throttle = -0.6;
       }
     }
 
-    // F. Nitro Boost Cooldown Timer
     if (nitroActive) {
       if (nitroTimerRef.current === 0) {
-        nitroTimerRef.current = 5.0; // Boost lasts 5 seconds
+        nitroTimerRef.current = 5.0;
       } else {
         nitroTimerRef.current = Math.max(0, nitroTimerRef.current - delta);
         if (nitroTimerRef.current === 0) {
@@ -385,7 +439,7 @@ export default function VehicleController({
       nitroTimerRef.current = 0;
     }
 
-    // G. Distance & Score accumulation
+    // Distance and score metrics
     let currentDistance = distance;
     let currentScore = score;
     if (status === 'playing') {
@@ -394,37 +448,32 @@ export default function VehicleController({
       currentScore += speedMps * delta * 5 * scoreMultiplier;
     }
 
-    // Apply forces
-    let gripLateral = 0.82;
-    if (weather === 'rain') gripLateral = 0.52;
-    else if (weather === 'snow') gripLateral = 0.35;
-    else if (weather === 'fog') gripLateral = 0.72;
+    // Apply linear forces
+    let gripLateral = 0.88;
+    if (weather === 'rain') gripLateral = 0.58;
+    else if (weather === 'snow') gripLateral = 0.38;
+    else if (weather === 'fog') gripLateral = 0.78;
 
     const dragCoeff = 0.005;
-    const accelerationForce = throttle * 22.0; // Boosted arcade acceleration
+    const accelerationForce = throttle * 22.0;
     const forceVec = forwardVec.clone().multiplyScalar(accelerationForce);
 
     // Apply drag
     const dragForce = velocityVec.clone().multiplyScalar(-dragCoeff * speedKmh);
     forceVec.add(dragForce);
 
-    // Side friction (stabilizer)
+    // Side friction (suppress lateral sliding entirely for stable arcade handling)
     const lateralSpeed = velocityVec.dot(rightVec);
-    const lateralFrictionForce = rightVec.clone().multiplyScalar(-lateralSpeed * gripLateral * 8.0);
+    const lateralFrictionForce = rightVec.clone().multiplyScalar(-lateralSpeed * gripLateral * 12.0);
     forceVec.add(lateralFrictionForce);
 
     rb.applyImpulse(forceVec, true);
 
-    // Steering torque
-    const steerSpeedScale = Math.max(0.2, 1.0 - speedKmh / 280);
-    const steerTorque = -steerInput * 2.2 * steerSpeedScale; // Responsive arcade steering
+    // Steering torque (progressive and stabilized)
+    const steerTorque = -steerAngleRef.current * 5.2;
     rb.applyTorqueImpulse({ x: 0, y: steerTorque, z: 0 }, true);
 
-    // Roll stabilization
-    const angVel = rb.angvel();
-    rb.setAngvel({ x: angVel.x * 0.9, y: angVel.y, z: angVel.z * 0.8 }, true);
-
-    // Gear & RPM calculations
+    // Dynamic Gear and RPM
     let gear = 1;
     if (speedKmh > 220) gear = 6;
     else if (speedKmh > 170) gear = 5;
@@ -452,7 +501,7 @@ export default function VehicleController({
       }
     }
 
-    // Dynamic Finish Line crossing
+    // Finish Line crossed logic
     const carPos3D = new THREE.Vector3(translation.x, translation.y, translation.z);
     const fz = finishZoneRef.current;
     const distToFinish = carPos3D.distanceTo(fz.center);
@@ -476,7 +525,7 @@ export default function VehicleController({
       speed: speedKmh,
       rpm: rpm,
       gear: gear,
-      nitroLevel: nitroActive ? Math.round(nitroTimerRef.current * 20) : 100, // Show boost timer on HUD nitro gauge
+      nitroLevel: nitroActive ? Math.round(nitroTimerRef.current * 20) : 100,
       nitroActive: nitroActive,
       isDrifting: false,
       driftTime: 0,
@@ -488,7 +537,7 @@ export default function VehicleController({
       score: Math.round(currentScore)
     });
 
-    // Ghost Replay interpolation
+    // Ghost Replay coordinates interpolation
     if (ghostReplayData && ghostReplayData.length > 0) {
       const idx = Math.floor(statsRef.current.raceTime / 100);
       if (idx < ghostReplayData.length) {
@@ -499,35 +548,82 @@ export default function VehicleController({
       }
     }
 
-    // ─── Dynamic FOV & Camera Shake Visual Effects ───
+    // 6. Visual front wheels steering & roll rotations
+    wheelRollRef.current += (speedKmh / 3.6) * delta * 2.5;
+
+    if (frontLeftWheelRef.current) {
+      frontLeftWheelRef.current.rotation.y = steerAngleRef.current * 0.6;
+      frontLeftWheelRef.current.children[0].rotation.x = wheelRollRef.current;
+    }
+    if (frontRightWheelRef.current) {
+      frontRightWheelRef.current.rotation.y = steerAngleRef.current * 0.6;
+      frontRightWheelRef.current.children[0].rotation.x = wheelRollRef.current;
+    }
+    if (rearLeftWheelRef.current) {
+      rearLeftWheelRef.current.children[0].rotation.x = wheelRollRef.current;
+    }
+    if (rearRightWheelRef.current) {
+      rearRightWheelRef.current.children[0].rotation.x = wheelRollRef.current;
+    }
+
+    // 7. Rebuild Dynamic Chase Follow Camera
     const pCamera = camera as THREE.PerspectiveCamera;
     if (pCamera.isPerspectiveCamera) {
-      const targetFov = nitroActive ? 82 : 60;
+      const targetFov = nitroActive ? 82 : 68;
       pCamera.fov = THREE.MathUtils.lerp(pCamera.fov, targetFov, 0.08);
       pCamera.updateProjectionMatrix();
     }
 
-    // ─── Camera Modes Tracking ───
     const carCenter = new THREE.Vector3(translation.x, translation.y + 0.6, translation.z);
 
+    // ─── PHOTO MODE AUTOMATIC ORBIT CAMERA ───
+    if (photoModeActive) {
+      const orbitAngle = state.clock.elapsedTime * 0.15;
+      const orbitRadius = 7.2;
+      const orbitHeight = 1.8;
+      
+      cameraTargetPos.set(
+        carCenter.x + Math.sin(orbitAngle) * orbitRadius,
+        carCenter.y + orbitHeight,
+        carCenter.z + Math.cos(orbitAngle) * orbitRadius
+      );
+      
+      camera.position.lerp(cameraTargetPos, 0.08);
+      camera.lookAt(carCenter);
+      return;
+    }
+
     if (cameraMode === 'thirdPerson' || cameraMode === 'farChase') {
-      const offsetDist = cameraMode === 'thirdPerson' ? 7.5 : 11.0;
-      const offsetHeight = cameraMode === 'thirdPerson' ? 2.6 : 4.2;
-      const lookDist = cameraMode === 'thirdPerson' ? 4.5 : 6.5;
-      const lerpFactor = cameraMode === 'thirdPerson' ? 0.12 : 0.07;
-      
-      cameraTargetPos.copy(forwardVec).multiplyScalar(-offsetDist).add(new THREE.Vector3(0, offsetHeight, 0)).add(carCenter);
-      cameraLookAtPos.copy(carCenter).add(forwardVec.clone().multiplyScalar(lookDist));
-      
-      // Raycast from carCenter to cameraTargetPos to resolve collisions
+      const offsetDist = cameraMode === 'thirdPerson' ? 7.6 : 11.2;
+      const offsetHeight = cameraMode === 'thirdPerson' ? 2.8 : 4.4;
+      const lookDist = cameraMode === 'thirdPerson' ? 4.8 : 6.8;
+      const lerpFactor = cameraMode === 'thirdPerson' ? 0.12 : 0.08;
+
+      // Camera drift lag swing: base target position on current velocity direction rather than static heading
+      let cameraHeading = forwardVec.clone();
+      if (speedKmh > 12) {
+        const horizontalVelocity = velocityVec.clone();
+        horizontalVelocity.y = 0;
+        if (horizontalVelocity.lengthSq() > 1.0) {
+          cameraHeading.copy(horizontalVelocity.normalize());
+        }
+      }
+
+      cameraTargetPos.copy(cameraHeading).multiplyScalar(-offsetDist).add(new THREE.Vector3(0, offsetHeight, 0)).add(carCenter);
+      cameraLookAtPos.copy(carCenter).add(cameraHeading.clone().multiplyScalar(lookDist));
+
+      // Prevent camera from going below car floor level or ground level
+      cameraTargetPos.y = Math.max(carCenter.y + 0.6, cameraTargetPos.y);
+
+      // Raycast from carCenter to cameraTargetPos to resolve collision blocks
       const rayDir = cameraTargetPos.clone().sub(carCenter).normalize();
       const maxDistance = cameraTargetPos.distanceTo(carCenter);
-      
+
       const ray = new rapier.Ray(
         { x: carCenter.x, y: carCenter.y, z: carCenter.z },
         { x: rayDir.x, y: rayDir.y, z: rayDir.z }
       );
-      
+
       const hit = world.castRay(
         ray,
         maxDistance,
@@ -541,13 +637,11 @@ export default function VehicleController({
           return !name.includes('player_car') && !name.includes('ai_');
         }
       );
-      
+
       if (hit) {
-        // Enforce safe distance cushion (1.8m minimum behind)
         const safeDist = Math.max(1.8, hit.timeOfImpact - 0.5);
         const safeTargetPos = carCenter.clone().add(rayDir.clone().multiplyScalar(safeDist));
         
-        // If current camera is further away than safe position, pull it in instantly to avoid clipping
         const currentDist = camera.position.distanceTo(carCenter);
         if (currentDist > safeDist) {
           camera.position.copy(safeTargetPos);
@@ -555,21 +649,19 @@ export default function VehicleController({
           camera.position.lerp(safeTargetPos, 0.25);
         }
       } else {
-        // No obstacle: smooth lerp to target
         camera.position.lerp(cameraTargetPos, lerpFactor);
       }
-      
-      // Screen shake offset during Nitro hyper boost
+
+      // Camera vibration shake during nitro boost
       if (nitroActive) {
         const intensity = cameraMode === 'thirdPerson' ? 0.12 : 0.16;
         camera.position.x += (Math.random() - 0.5) * intensity;
         camera.position.y += (Math.random() - 0.5) * intensity;
       }
-      
+
       camera.lookAt(cameraLookAtPos);
-      
+
     } else if (cameraMode === 'cockpit') {
-      // 3. COCKPIT CAMERA
       cameraTargetPos.copy(forwardVec).multiplyScalar(0.25).add(new THREE.Vector3(0, 0.22, 0)).add(carCenter);
       cameraLookAtPos.copy(forwardVec).multiplyScalar(20.0).add(cameraTargetPos);
       
@@ -579,11 +671,9 @@ export default function VehicleController({
         camera.position.x += (Math.random() - 0.5) * 0.05;
         camera.position.y += (Math.random() - 0.5) * 0.05;
       }
-      
       camera.lookAt(cameraLookAtPos);
-      
+
     } else if (cameraMode === 'hood') {
-      // 4. HOOD CAMERA
       cameraTargetPos.copy(forwardVec).multiplyScalar(1.6).add(new THREE.Vector3(0, 0.08, 0)).add(carCenter);
       cameraLookAtPos.copy(forwardVec).multiplyScalar(25.0).add(cameraTargetPos);
       
@@ -593,11 +683,9 @@ export default function VehicleController({
         camera.position.x += (Math.random() - 0.5) * 0.05;
         camera.position.y += (Math.random() - 0.5) * 0.05;
       }
-      
       camera.lookAt(cameraLookAtPos);
-      
+
     } else if (cameraMode === 'orbit') {
-      // 5. ORBIT CAMERA (Showroom / Idle spin)
       const angle = state.clock.elapsedTime * 0.25;
       const radius = 8.5;
       const height = 2.2;
@@ -610,12 +698,10 @@ export default function VehicleController({
       
       camera.position.lerp(cameraTargetPos, 0.08);
       camera.lookAt(carCenter);
-      
+
     } else if (cameraMode === 'replay') {
-      // 6. CINEMATIC TV REPLAY TRACKSIDE CAMERA
       const points = waypointsRef.current;
       if (points.length >= 10) {
-        // Find nearest waypoint to player
         let nearestWpIdx = 0;
         let minDist = Infinity;
         for (let i = 0; i < points.length; i++) {
@@ -630,7 +716,6 @@ export default function VehicleController({
         const distToCam = carCenter.distanceTo(currentCamPos);
         const timeNow = state.clock.elapsedTime;
         
-        // Switch camera positions based on timing or distance
         if (timeNow - lastCameraSwitchRef.current > 4.5 || distToCam > 80.0 || distToCam < 6.0 || currentCamPos.lengthSq() === 0) {
           const targetWpIdx = (nearestWpIdx + 14) % points.length;
           const side = (targetWpIdx % 2 === 0) ? 1.0 : -1.0;
@@ -647,19 +732,17 @@ export default function VehicleController({
         camera.position.lerp(replayCameraPosRef.current, 0.09);
         camera.lookAt(carCenter);
       } else {
-        // Fallback to thirdPerson if waypoints not loaded
         cameraTargetPos.copy(forwardVec).multiplyScalar(-7.2).add(new THREE.Vector3(0, 2.6, 0)).add(carCenter);
         camera.position.lerp(cameraTargetPos, 0.12);
         camera.lookAt(carCenter);
       }
     }
 
-    // ─── Speed boost wind lines particle animation ───
     if (speedLinesRef.current && nitroActive && status === 'playing') {
       speedLinesRef.current.children.forEach((line) => {
-        line.position.z += 0.8; // Move past the car at warp speed
+        line.position.z += 0.8;
         if (line.position.z > 5.0) {
-          line.position.z = -15.0 - Math.random() * 10.0; // Respawn far ahead
+          line.position.z = -15.0 - Math.random() * 10.0;
           line.position.x = (Math.random() - 0.5) * 4.5;
           line.position.y = (Math.random() - 0.5) * 2.0 + 0.4;
         }
@@ -675,12 +758,13 @@ export default function VehicleController({
         colliders={false}
         position={startTransform.position}
         rotation={startTransform.rotation}
-        angularDamping={1.6}
-        linearDamping={0.12}
+        angularDamping={2.0} // High damping for arcade stability
+        linearDamping={0.4}   // High damping for chassis stiffness
         onCollisionEnter={handleCollision}
         name="player_car"
       >
         <CuboidCollider args={[0.9, 0.35, 2.1]} position={[0, -0.02, 0]} restitution={0.05} friction={0.3} />
+        
         <group ref={chassisRef}>
           {/* Chassis */}
           <mesh castShadow receiveShadow>
@@ -753,23 +837,37 @@ export default function VehicleController({
             decay={1.8}
           />
 
-          {/* Wheels */}
-          <mesh position={[-0.95, -0.3, -1.3]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.42, 0.42, 0.35, 16]} />
-            <meshStandardMaterial color="#111" roughness={0.9} />
-          </mesh>
-          <mesh position={[0.95, -0.3, -1.3]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.42, 0.42, 0.35, 16]} />
-            <meshStandardMaterial color="#111" roughness={0.9} />
-          </mesh>
-          <mesh position={[-0.95, -0.3, 1.3]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.42, 0.42, 0.35, 16]} />
-            <meshStandardMaterial color="#111" roughness={0.9} />
-          </mesh>
-          <mesh position={[0.95, -0.3, 1.3]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.42, 0.42, 0.35, 16]} />
-            <meshStandardMaterial color="#111" roughness={0.9} />
-          </mesh>
+          {/* Front Left Wheel */}
+          <group position={[-0.95, -0.3, -1.3]} ref={frontLeftWheelRef}>
+            <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
+              <cylinderGeometry args={[0.42, 0.42, 0.35, 16]} />
+              <meshStandardMaterial color="#111" roughness={0.9} />
+            </mesh>
+          </group>
+
+          {/* Front Right Wheel */}
+          <group position={[0.95, -0.3, -1.3]} ref={frontRightWheelRef}>
+            <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
+              <cylinderGeometry args={[0.42, 0.42, 0.35, 16]} />
+              <meshStandardMaterial color="#111" roughness={0.9} />
+            </mesh>
+          </group>
+
+          {/* Rear Left Wheel */}
+          <group position={[-0.95, -0.3, 1.3]} ref={rearLeftWheelRef}>
+            <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
+              <cylinderGeometry args={[0.42, 0.42, 0.35, 16]} />
+              <meshStandardMaterial color="#111" roughness={0.9} />
+            </mesh>
+          </group>
+
+          {/* Rear Right Wheel */}
+          <group position={[0.95, -0.3, 1.3]} ref={rearRightWheelRef}>
+            <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
+              <cylinderGeometry args={[0.42, 0.42, 0.35, 16]} />
+              <meshStandardMaterial color="#111" roughness={0.9} />
+            </mesh>
+          </group>
         </group>
       </RigidBody>
 

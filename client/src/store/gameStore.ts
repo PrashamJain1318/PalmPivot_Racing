@@ -79,6 +79,7 @@ export interface GameState {
   trackingLatency: number;
   handsLostNotification: boolean;
   rawWheelAngle: number;
+  photoModeActive: boolean;
   
   // Upgrades features
   achievements: string[];
@@ -97,6 +98,7 @@ export interface GameState {
   addXp: (amount: number) => void;
   purchaseCar: (carId: string, cost: number, currency: 'coins' | 'diamonds') => boolean;
   saveCarPreset: (carId: string, preset: PlayerCarPreset) => void;
+  setPhotoModeActive: (photoModeActive: boolean) => void;
   unlockAchievement: (id: string) => void;
   updateChallengeProgress: (id: string, amount: number) => void;
   saveGhostReplay: (data: [number, number, number][]) => void;
@@ -176,6 +178,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   trackingLatency: 0,
   handsLostNotification: false,
   rawWheelAngle: 0,
+  photoModeActive: false,
 
   achievements: [],
   dailyChallenges: [...DEFAULT_CHALLENGES],
@@ -184,6 +187,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   setStatus: (status) => set({ status }),
   setTrack: (currentTrack) => set({ currentTrack }),
   setCar: (currentCar) => set({ currentCar }),
+  setPhotoModeActive: (photoModeActive) => set({ photoModeActive }),
 
   updateVehicleStats: (stats) => {
     set((state) => ({ ...state, ...stats }));
@@ -323,7 +327,8 @@ export const useGameStore = create<GameState>((set, get) => ({
     handsCount: 0,
     trackingLatency: 0,
     handsLostNotification: false,
-    rawWheelAngle: 0
+    rawWheelAngle: 0,
+    photoModeActive: false
   }),
 
   resetRaceStats: () => set({
@@ -351,6 +356,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     handsCount: 0,
     trackingLatency: 0,
     handsLostNotification: false,
-    rawWheelAngle: 0
+    rawWheelAngle: 0,
+    photoModeActive: false
   })
 }));
