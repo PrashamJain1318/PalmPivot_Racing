@@ -38,6 +38,8 @@ export default function VehicleController({
   // Custom refs for smoothing steering and wheel roll
   const steerAngleRef = useRef(0);
   const wheelRollRef = useRef(0);
+  const headlightLeftTargetRef = useRef<THREE.Object3D>(null);
+  const headlightRightTargetRef = useRef<THREE.Object3D>(null);
   const displaySpeedRef = useRef(0);
   const stuckTimeRef = useRef(0);
   const flippedTimeRef = useRef(0);
@@ -766,37 +768,72 @@ export default function VehicleController({
         <CuboidCollider args={[0.9, 0.35, 2.1]} position={[0, -0.02, 0]} restitution={0.05} friction={0.3} />
         
         <group ref={chassisRef}>
-          {/* Chassis */}
+          {/* Headlight targets for spotlight beams */}
+          <object3D ref={headlightLeftTargetRef} position={[-0.75, 0.1, -10]} />
+          <object3D ref={headlightRightTargetRef} position={[0.75, 0.1, -10]} />
+
+          {/* Active Headlights (illuminate road at night, fog or storm) */}
+          {(weather === 'night' || weather === 'fog' || weather === 'storm' || (currentTrack && currentTrack.toLowerCase().includes('night'))) && (
+            <>
+              <spotLight
+                position={[-0.75, 0.1, -2.1]}
+                target={headlightLeftTargetRef.current || undefined}
+                angle={0.38}
+                penumbra={0.6}
+                intensity={18.0}
+                distance={35.0}
+                color="#fffdf2"
+                castShadow
+              />
+              <spotLight
+                position={[0.75, 0.1, -2.1]}
+                target={headlightRightTargetRef.current || undefined}
+                angle={0.38}
+                penumbra={0.6}
+                intensity={18.0}
+                distance={35.0}
+                color="#fffdf2"
+                castShadow
+              />
+            </>
+          )}
+
+          {/* Chassis PBR metallic paint */}
           <mesh castShadow receiveShadow>
             <boxGeometry args={[1.8, 0.7, 4.2]} />
-            <meshStandardMaterial color={paintColor} roughness={0.1} metalness={0.8} />
+            <meshStandardMaterial color={paintColor} roughness={0.08} metalness={0.92} envMapIntensity={1.8} />
           </mesh>
           
           {/* Windshield */}
           <mesh position={[0, 0.45, -0.4]} rotation={[-0.4, 0, 0]}>
             <boxGeometry args={[1.6, 0.4, 1.2]} />
-            <meshStandardMaterial color="#111" transparent opacity={0.6} roughness={0.0} />
+            <meshStandardMaterial color="#111" transparent opacity={0.7} roughness={0.0} metalness={1.0} />
           </mesh>
 
           {/* Lights */}
           <mesh position={[-0.7, -0.1, -2.1]}>
             <boxGeometry args={[0.2, 0.1, 0.1]} />
-            <meshBasicMaterial color="#00ffff" />
+            <meshBasicMaterial color="#e0f7fa" />
           </mesh>
           <mesh position={[0.7, -0.1, -2.1]}>
             <boxGeometry args={[0.2, 0.1, 0.1]} />
-            <meshBasicMaterial color="#00ffff" />
+            <meshBasicMaterial color="#e0f7fa" />
           </mesh>
 
           {/* Taillights */}
           <mesh position={[-0.7, 0.1, 2.11]}>
             <boxGeometry args={[0.3, 0.08, 0.05]} />
-            <meshBasicMaterial color={currentGesture === 'brake' ? '#ff0000' : '#880000'} />
+            <meshBasicMaterial color={currentGesture === 'brake' ? '#ff1111' : '#660000'} />
           </mesh>
           <mesh position={[0.7, 0.1, 2.11]}>
             <boxGeometry args={[0.3, 0.08, 0.05]} />
-            <meshBasicMaterial color={currentGesture === 'brake' ? '#ff0000' : '#880000'} />
+            <meshBasicMaterial color={currentGesture === 'brake' ? '#ff1111' : '#660000'} />
           </mesh>
+
+          {/* Active red glow on braking */}
+          {currentGesture === 'brake' && (
+            <pointLight position={[0, 0.1, 2.3]} color="#ff0000" intensity={6.0} distance={5.0} />
+          )}
 
           {/* Spoiler */}
           <group position={[0, 0.6, 1.8]}>
@@ -828,6 +865,21 @@ export default function VehicleController({
             ))}
           </group>
 
+          {/* Nitro exhaust flames & pointLight glow */}
+          {nitroActive && (
+            <>
+              <mesh position={[-0.4, -0.3, 2.18]} rotation={[Math.PI / 2, 0, 0]}>
+                <coneGeometry args={[0.15, 0.9, 8]} />
+                <meshBasicMaterial color="#00d4ff" transparent opacity={0.8} />
+              </mesh>
+              <mesh position={[0.4, -0.3, 2.18]} rotation={[Math.PI / 2, 0, 0]}>
+                <coneGeometry args={[0.15, 0.9, 8]} />
+                <meshBasicMaterial color="#00d4ff" transparent opacity={0.8} />
+              </mesh>
+              <pointLight position={[0, -0.3, 2.3]} color="#00d4ff" intensity={8.0} distance={5.0} />
+            </>
+          )}
+
           {/* Neon Underglow light */}
           <pointLight
             position={[0, -0.4, 0]}
@@ -841,7 +893,12 @@ export default function VehicleController({
           <group position={[-0.95, -0.3, -1.3]} ref={frontLeftWheelRef}>
             <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
               <cylinderGeometry args={[0.42, 0.42, 0.35, 16]} />
-              <meshStandardMaterial color="#111" roughness={0.9} />
+              <meshStandardMaterial color="#1a1a1a" roughness={0.8} metalness={0.15} />
+            </mesh>
+            {/* Shiny alloy center rim */}
+            <mesh rotation={[0, 0, Math.PI / 2]} position={[-0.05, 0, 0]}>
+              <cylinderGeometry args={[0.26, 0.26, 0.36, 12]} />
+              <meshStandardMaterial color="#d1d5db" roughness={0.1} metalness={0.9} />
             </mesh>
           </group>
 
@@ -849,7 +906,12 @@ export default function VehicleController({
           <group position={[0.95, -0.3, -1.3]} ref={frontRightWheelRef}>
             <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
               <cylinderGeometry args={[0.42, 0.42, 0.35, 16]} />
-              <meshStandardMaterial color="#111" roughness={0.9} />
+              <meshStandardMaterial color="#1a1a1a" roughness={0.8} metalness={0.15} />
+            </mesh>
+            {/* Shiny alloy center rim */}
+            <mesh rotation={[0, 0, Math.PI / 2]} position={[0.05, 0, 0]}>
+              <cylinderGeometry args={[0.26, 0.26, 0.36, 12]} />
+              <meshStandardMaterial color="#d1d5db" roughness={0.1} metalness={0.9} />
             </mesh>
           </group>
 
@@ -857,7 +919,12 @@ export default function VehicleController({
           <group position={[-0.95, -0.3, 1.3]} ref={rearLeftWheelRef}>
             <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
               <cylinderGeometry args={[0.42, 0.42, 0.35, 16]} />
-              <meshStandardMaterial color="#111" roughness={0.9} />
+              <meshStandardMaterial color="#1a1a1a" roughness={0.8} metalness={0.15} />
+            </mesh>
+            {/* Shiny alloy center rim */}
+            <mesh rotation={[0, 0, Math.PI / 2]} position={[-0.05, 0, 0]}>
+              <cylinderGeometry args={[0.26, 0.26, 0.36, 12]} />
+              <meshStandardMaterial color="#d1d5db" roughness={0.1} metalness={0.9} />
             </mesh>
           </group>
 
@@ -865,7 +932,12 @@ export default function VehicleController({
           <group position={[0.95, -0.3, 1.3]} ref={rearRightWheelRef}>
             <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
               <cylinderGeometry args={[0.42, 0.42, 0.35, 16]} />
-              <meshStandardMaterial color="#111" roughness={0.9} />
+              <meshStandardMaterial color="#1a1a1a" roughness={0.8} metalness={0.15} />
+            </mesh>
+            {/* Shiny alloy center rim */}
+            <mesh rotation={[0, 0, Math.PI / 2]} position={[0.05, 0, 0]}>
+              <cylinderGeometry args={[0.26, 0.26, 0.36, 12]} />
+              <meshStandardMaterial color="#d1d5db" roughness={0.1} metalness={0.9} />
             </mesh>
           </group>
         </group>

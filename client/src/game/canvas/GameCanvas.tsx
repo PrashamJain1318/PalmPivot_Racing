@@ -11,6 +11,12 @@ import VehicleController from '../physics/VehicleController';
 import { useGameStore } from '@/store/gameStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import * as THREE from 'three';
+// @ts-ignore
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';
+// @ts-ignore
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
+// @ts-ignore
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass';
 
 // ─── Error Boundary: prevents any child error from collapsing the canvas ───
 interface ErrorBoundaryState { hasError: boolean; error?: string }
@@ -253,6 +259,42 @@ function Lightning() {
   return <directionalLight intensity={intensity} color="#e8f0ff" position={[20, 120, 20]} />;
 }
 
+// ─── Post-Processing Effects Pass (Optimized manual Three.js implementation) ───
+function PostProcessingEffect() {
+  const { gl, scene, camera, size } = useThree();
+  const composerRef = useRef<EffectComposer | null>(null);
+
+  useEffect(() => {
+    // Instantiate Three.js postprocessing chain manually
+    const composer = new EffectComposer(gl);
+    const renderPass = new RenderPass(scene, camera);
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(size.width, size.height), 0.35, 0.4, 0.85);
+
+    composer.addPass(renderPass);
+    composer.addPass(bloomPass);
+    composerRef.current = composer;
+
+    return () => {
+      composer.dispose();
+    };
+  }, [gl, scene, camera]);
+
+  useEffect(() => {
+    if (composerRef.current) {
+      composerRef.current.setSize(size.width, size.height);
+    }
+  }, [size]);
+
+  useFrame(() => {
+    if (composerRef.current) {
+      gl.autoClear = true;
+      composerRef.current.render();
+    }
+  }, 1);
+
+  return null;
+}
+
 export default function GameCanvas() {
   const currentCar = useGameStore((s) => s.currentCar);
   const presets = useGameStore((s) => s.presets);
@@ -332,6 +374,7 @@ export default function GameCanvas() {
       >
         {/* Renderer configuration — runs inside Canvas */}
         <RendererConfig />
+        <PostProcessingEffect />
 
         {/* Confirms scene graph is alive even if all content fails */}
         <SceneOriginMarker />
