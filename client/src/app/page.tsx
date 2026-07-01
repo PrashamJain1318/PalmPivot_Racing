@@ -66,6 +66,7 @@ export default function Home() {
   // Photo Mode states
   const photoModeActive = useGameStore((s) => s.photoModeActive);
   const setPhotoModeActive = useGameStore((s) => s.setPhotoModeActive);
+  const trackLoaded = useGameStore((s) => s.trackLoaded);
   const [activeFilter, setActiveFilter] = useState<'none' | 'cyberpunk' | 'vintage' | 'monochrome'>('none');
   const [savedPhotos, setSavedPhotos] = useState<string[]>([]);
   const [showGallery, setShowGallery] = useState(false);
@@ -181,7 +182,7 @@ export default function Home() {
 
   // Race Countdown sequence manager
   useEffect(() => {
-    if (status !== 'countdown') return;
+    if (status !== 'countdown' || !trackLoaded) return;
     setCountdownNumber(3);
     
     // Play initial 3 chime
@@ -244,7 +245,7 @@ export default function Home() {
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [status, setStatus]);
+  }, [status, setStatus, trackLoaded]);
 
   const activeCarPreset = presets[currentCar] || {
     paint: '#ffffff',
@@ -545,49 +546,49 @@ export default function Home() {
                   )}
 
                   {activeTab === 'map' && (
-                    <div className="fixed inset-y-0 left-0 w-full max-w-2xl bg-white/95 border-r border-slate-200 p-8 flex flex-col justify-between z-30 pointer-events-auto shadow-2xl text-slate-800">
+                    <div className="fixed inset-y-0 left-0 w-full max-w-2xl bg-white/95 border-r border-slate-200 p-8 flex flex-col justify-between z-30 pointer-events-auto shadow-2xl text-slate-800 font-sans">
                       <div className="flex justify-between items-center border-b border-slate-200 pb-4 mb-4">
                         <div>
-                          <h2 className="text-base font-extrabold text-[#00CFFF] uppercase tracking-widest flex items-center gap-2">
-                            <MapIcon className="w-4 h-4" /> 100+ MAP COLLECTION
+                          <h2 className="text-lg font-black text-cyan-600 uppercase tracking-widest flex items-center gap-2">
+                            <MapIcon className="w-5 h-5 text-cyan-500" /> WORLD CIRCUIT CATALOGUE
                           </h2>
-                          <span className="text-[8px] text-slate-400 uppercase mt-0.5">Filter and launch routes</span>
+                          <span className="text-[10px] text-slate-400 uppercase font-mono mt-0.5">Explore, select and warp to routes</span>
                         </div>
-                        <button onClick={() => { synthSound('click'); setActiveTab('menu'); }} className="text-xs uppercase text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+                        <button onClick={() => { synthSound('click'); setActiveTab('menu'); }} className="p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition"><X className="w-5 h-5" /></button>
                       </div>
 
-                      {/* Search & Difficulty Filter */}
-                      <div className="flex gap-3.5 mb-4 text-xs">
+                      {/* Search & Filters */}
+                      <div className="grid grid-cols-2 gap-4 mb-4 text-xs font-mono">
                         <input
                           type="text"
                           placeholder="Search track name..."
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
-                          className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 font-mono"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 outline-none focus:border-cyan-500 transition"
                         />
                         <select
                           value={selectedDifficulty}
                           onChange={(e) => setSelectedDifficulty(e.target.value)}
-                          className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 font-mono"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 outline-none focus:border-cyan-500 transition cursor-pointer"
                         >
                           <option value="All">All Difficulties</option>
-                          <option value="easy">Easy</option>
-                          <option value="medium">Medium</option>
-                          <option value="hard">Hard</option>
-                          <option value="expert">Expert</option>
-                          <option value="nightmare">Nightmare</option>
+                          <option value="easy">🟩 Easy</option>
+                          <option value="medium">🟦 Medium</option>
+                          <option value="hard">🟨 Hard</option>
+                          <option value="expert">🟥 Expert</option>
+                          <option value="nightmare">🟪 Nightmare</option>
                         </select>
                       </div>
 
-                      {/* Category tabs list */}
-                      <div className="flex gap-2 overflow-x-auto pb-3 mb-4 max-w-full text-[9px] border-b border-slate-200 scrollbar-thin">
-                        {['All', 'City', 'Highway', 'Desert', 'Mountain', 'Snow', 'Forest', 'Beach', 'Canyon', 'Volcano', 'Jungle', 'Cyberpunk', 'Space', 'Island'].map((cat) => (
+                      {/* Category tabs */}
+                      <div className="flex gap-2 overflow-x-auto pb-3 mb-4 max-w-full text-[10px] font-mono border-b border-slate-100 scrollbar-thin">
+                        {['All', 'Circuit', 'City', 'Highway', 'Desert', 'Mountain', 'Snow', 'Forest', 'Beach', 'Canyon', 'Volcano', 'Jungle', 'Cyberpunk', 'Space', 'Island'].map((cat) => (
                           <button
                             key={cat}
                             onClick={() => { synthSound('hover'); setSelectedCategory(cat); }}
-                            className={`px-3 py-1.5 rounded-lg border uppercase whitespace-nowrap ${
+                            className={`px-3.5 py-2 rounded-xl border uppercase whitespace-nowrap transition ${
                               selectedCategory === cat 
-                                ? 'border-[#00CFFF] bg-[#00CFFF]/10 text-[#00CFFF] font-bold' 
+                                ? 'border-cyan-500 bg-cyan-500/10 text-cyan-600 font-extrabold shadow-[0_2px_10px_rgba(6,182,212,0.15)]' 
                                 : 'border-slate-200 text-slate-400 hover:bg-slate-50'
                             }`}
                           >
@@ -596,8 +597,8 @@ export default function Home() {
                         ))}
                       </div>
 
-                      {/* Scrollable list grid of filtered tracks */}
-                      <div className="flex-1 space-y-2.5 overflow-y-auto pr-1">
+                      {/* Premium Grid List of Tracks */}
+                      <div className="flex-1 space-y-4 overflow-y-auto pr-1 pb-4">
                         {tracks
                           .filter((t) => {
                             const matchesSearch = t.name.toLowerCase().includes(searchQuery.toLowerCase()) || t.category.toLowerCase().includes(searchQuery.toLowerCase());
@@ -605,44 +606,100 @@ export default function Home() {
                             const matchesDifficulty = selectedDifficulty === 'All' || t.difficulty === selectedDifficulty;
                             return matchesSearch && matchesCategory && matchesDifficulty;
                           })
-                          .map((tr) => (
-                            <div key={tr.id} className="flex justify-between items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 hover:border-[#00CFFF]/45 transition">
-                              <div className="flex flex-col gap-1 text-[10px]">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-bold text-slate-800 text-xs">{tr.name}</span>
-                                  <span className="px-1.5 py-0.5 bg-slate-200 rounded text-[8px] text-slate-600 uppercase">{tr.category}</span>
+                          .map((tr) => {
+                            // Determine category gradient colors
+                            let catGradient = 'from-slate-400 to-slate-600';
+                            if (tr.id === 'suzuka') catGradient = 'from-amber-400 via-red-500 to-rose-600';
+                            else if (tr.category === 'City') catGradient = 'from-blue-600 to-cyan-500';
+                            else if (tr.category === 'Highway') catGradient = 'from-indigo-600 to-violet-500';
+                            else if (tr.category === 'Desert' || tr.category === 'Canyon') catGradient = 'from-amber-500 to-orange-600';
+                            else if (tr.category === 'Mountain' || tr.category === 'Volcano') catGradient = 'from-red-600 to-orange-500';
+                            else if (tr.category === 'Snow') catGradient = 'from-sky-300 via-sky-100 to-blue-200';
+                            else if (tr.category === 'Forest' || tr.category === 'Jungle') catGradient = 'from-emerald-600 to-teal-500';
+                            else if (tr.category === 'Beach' || tr.category === 'Island') catGradient = 'from-teal-400 via-emerald-300 to-sky-400';
+                            else if (tr.category === 'Cyberpunk') catGradient = 'from-fuchsia-600 via-purple-600 to-pink-500';
+                            else if (tr.category === 'Space') catGradient = 'from-indigo-950 via-slate-900 to-purple-950';
+
+                            return (
+                              <div 
+                                key={tr.id} 
+                                className={`group flex flex-col bg-white border rounded-2xl overflow-hidden hover:shadow-xl transition-all duration-300 ${
+                                  currentTrack === tr.id ? 'border-cyan-500 ring-2 ring-cyan-500/20' : 'border-slate-200'
+                                }`}
+                              >
+                                {/* Track Card Header (Gradient Image Placeholder) */}
+                                <div className={`h-24 bg-gradient-to-r ${catGradient} relative p-4 flex flex-col justify-between text-white`}>
+                                  <div className="flex justify-between items-start">
+                                    <span className="px-2.5 py-0.5 bg-black/40 backdrop-blur-md rounded-full text-[9px] font-bold uppercase tracking-widest">
+                                      {tr.category}
+                                    </span>
+                                    <button
+                                      onClick={() => { synthSound('click'); toggleFavorite(tr.id); }}
+                                      className="p-1.5 bg-black/30 backdrop-blur-md hover:bg-black/50 text-white rounded-full transition"
+                                    >
+                                      <Heart className={`w-3.5 h-3.5 ${tr.favorite ? 'fill-pink-500 text-pink-500' : 'text-white'}`} />
+                                    </button>
+                                  </div>
+                                  <div>
+                                    <h3 className="text-sm font-black tracking-wide leading-tight group-hover:translate-x-1 transition duration-300 drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
+                                      {tr.name}
+                                    </h3>
+                                  </div>
                                 </div>
-                                <span className="text-slate-400">{tr.distance} KM • {tr.terrain} • {tr.weather}</span>
+
+                                {/* Track Metadata stats */}
+                                <div className="p-4 bg-slate-50 border-t border-slate-100 grid grid-cols-3 gap-2 text-center text-[10px] font-mono text-slate-500">
+                                  <div className="flex flex-col border-r border-slate-200">
+                                    <span className="text-[8px] text-slate-400 uppercase">Distance</span>
+                                    <span className="text-slate-800 font-bold mt-0.5">{tr.distance} KM</span>
+                                  </div>
+                                  <div className="flex flex-col border-r border-slate-200">
+                                    <span className="text-[8px] text-slate-400 uppercase">Est Duration</span>
+                                    <span className="text-slate-800 font-bold mt-0.5">{tr.estTime}</span>
+                                  </div>
+                                  <div className="flex flex-col">
+                                    <span className="text-[8px] text-slate-400 uppercase">Best Lap</span>
+                                    <span className="text-cyan-600 font-bold mt-0.5">
+                                      {tr.bestLap 
+                                        ? `${Math.floor(tr.bestLap / 60000)}:${Math.floor((tr.bestLap % 60000) / 1000).toString().padStart(2, '0')}.${Math.floor((tr.bestLap % 1000) / 10).toString().padStart(2, '0')}`
+                                        : '--:--.--'
+                                      }
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Track Action Footer */}
+                                <div className="p-3 bg-white border-t border-slate-100 flex justify-between items-center px-4">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`px-2 py-0.5 rounded text-[8px] font-bold font-mono uppercase ${
+                                      tr.difficulty === 'easy' ? 'bg-green-100 text-green-700' :
+                                      tr.difficulty === 'medium' ? 'bg-blue-100 text-blue-700' :
+                                      tr.difficulty === 'hard' ? 'bg-amber-100 text-amber-700' :
+                                      tr.difficulty === 'expert' ? 'bg-rose-100 text-rose-700' : 'bg-purple-100 text-purple-700'
+                                    }`}>{tr.difficulty}</span>
+                                    <span className="text-[10px] text-slate-400 capitalize">🌤️ {tr.weather}</span>
+                                  </div>
+
+                                  <button
+                                    onClick={() => {
+                                      synthSound('click');
+                                      setTrack(tr.id);
+                                      // Dynamically update settings weather to match track weather
+                                      setWeather(tr.weather === 'storm' ? 'fog' : tr.weather === 'sunny' ? 'sunny' : tr.weather === 'rain' ? 'rain' : 'snow');
+                                      setActiveTab('menu');
+                                    }}
+                                    className={`px-4 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-xl transition ${
+                                      currentTrack === tr.id 
+                                        ? 'bg-slate-200 text-slate-600 cursor-default' 
+                                        : 'bg-cyan-500 hover:bg-cyan-600 text-white shadow-md hover:shadow-lg'
+                                    }`}
+                                  >
+                                    {currentTrack === tr.id ? 'Active' : 'Warp Circuit'}
+                                  </button>
+                                </div>
                               </div>
-
-                              <div className="flex items-center gap-3">
-                                <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase ${
-                                  tr.difficulty === 'easy' ? 'bg-green-400/10 text-green-600' :
-                                  tr.difficulty === 'medium' ? 'bg-cyan-400/10 text-cyan-600' :
-                                  tr.difficulty === 'hard' ? 'bg-yellow-400/10 text-yellow-600' :
-                                  tr.difficulty === 'expert' ? 'bg-pink-400/10 text-pink-600' : 'bg-red-500/10 text-red-500'
-                                }`}>{tr.difficulty}</span>
-
-                                <button
-                                  onClick={() => { synthSound('click'); toggleFavorite(tr.id); }}
-                                  className="p-1 text-slate-400 hover:text-pink-500"
-                                >
-                                  <Heart className={`w-4 h-4 ${tr.favorite ? 'fill-pink-500 text-pink-500' : ''}`} />
-                                </button>
-
-                                <button
-                                  onClick={() => {
-                                    synthSound('click');
-                                    setTrack(tr.id);
-                                    setActiveTab('menu');
-                                  }}
-                                  className="px-3 py-1.5 bg-[#00CFFF] text-slate-950 font-bold rounded-lg text-[9px] uppercase hover:brightness-110 transition"
-                                >
-                                  Select
-                                </button>
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                       </div>
                     </div>
                   )}
@@ -1024,8 +1081,28 @@ export default function Home() {
         </div>
       )}
 
+      {/* 4.5. TRACK LOADING STATE OVERLAY */}
+      {status === 'countdown' && !trackLoaded && (
+        <div className="absolute inset-0 z-48 flex flex-col items-center justify-center bg-slate-950 backdrop-blur-md pointer-events-auto">
+          <div className="flex flex-col items-center justify-center gap-6 max-w-sm text-center">
+            {/* Glassmorphic spinner */}
+            <div className="relative w-16 h-16 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin shadow-[0_0_15px_rgba(6,182,212,0.4)]" />
+            <div>
+              <span className="text-[10px] font-black tracking-widest text-cyan-400 animate-pulse font-mono">SYNCHRONIZING WORLD METRICS</span>
+              <h2 className="text-2xl font-black italic text-white uppercase tracking-wide mt-1 font-mono">WARPING CIRCUIT</h2>
+              <p className="text-white/40 text-[9px] font-mono mt-3 leading-relaxed">
+                Loading geometry matrices, high-fidelity materials, barriers, environment details, and collision meshes...
+              </p>
+            </div>
+            <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+              <div className="h-full bg-cyan-400 rounded-full animate-[loading_1.5s_infinite]" style={{ width: '45%' }} />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 4. RACE START COUNTDOWN OVERLAY */}
-      {status === 'countdown' && (
+      {status === 'countdown' && trackLoaded && (
         <div className="absolute inset-0 z-45 flex items-center justify-center bg-black/35 backdrop-blur-sm pointer-events-none">
           <motion.div
             key={countdownNumber}

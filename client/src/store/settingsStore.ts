@@ -4,7 +4,7 @@ export type GraphicsQuality = 'low' | 'medium' | 'high';
 export type CameraMode = 'thirdPerson' | 'farChase' | 'cockpit' | 'hood' | 'orbit' | 'replay';
 export type HandMode = 'left' | 'right';
 export type GameTheme = 'light' | 'dark';
-export type GameWeather = 'sunny' | 'rain' | 'snow' | 'fog';
+export type GameWeather = 'sunny' | 'cloudy' | 'sunset' | 'night' | 'rain' | 'snow' | 'fog' | 'storm';
 export type UIScale = 'normal' | 'large';
 
 export interface SettingsState {

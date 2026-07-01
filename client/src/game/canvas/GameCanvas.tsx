@@ -207,7 +207,7 @@ function PhysicsWorld({
   paintColor: string;
   underglowColor: string;
 }) {
-  const weatherVal = weather === 'snow' ? 'snow' : weather === 'rain' ? 'rain' : 'sunny';
+  const weatherVal = weather as 'sunny' | 'rain' | 'snow' | 'fog' | 'storm';
 
   return (
     <Physics gravity={[0, -28, 0]}>
@@ -237,6 +237,22 @@ function PhysicsWorld({
   );
 }
 
+// ─── Storm Lightning Flash Simulator ───
+function Lightning() {
+  const [intensity, setIntensity] = React.useState(0);
+
+  useFrame(() => {
+    if (Math.random() > 0.985) {
+      setIntensity(5.0);
+    } else {
+      setIntensity((prev) => Math.max(0, prev * 0.85));
+    }
+  });
+
+  if (intensity === 0) return null;
+  return <directionalLight intensity={intensity} color="#e8f0ff" position={[20, 120, 20]} />;
+}
+
 export default function GameCanvas() {
   const currentCar = useGameStore((s) => s.currentCar);
   const presets = useGameStore((s) => s.presets);
@@ -250,12 +266,48 @@ export default function GameCanvas() {
 
   // Sky parameters by weather
   const skyConfig = {
-    sunny: { turbidity: 4,  rayleigh: 0.8, mieCoefficient: 0.003, mieDirectionalG: 0.92, sunPosition: [100, 80, -100] as [number,number,number] },
-    rain:  { turbidity: 14, rayleigh: 2.5, mieCoefficient: 0.02,  mieDirectionalG: 0.7,  sunPosition: [60,  30, -80]  as [number,number,number] },
-    snow:  { turbidity: 10, rayleigh: 1.5, mieCoefficient: 0.01,  mieDirectionalG: 0.8,  sunPosition: [80,  50, -60]  as [number,number,number] },
-    fog:   { turbidity: 20, rayleigh: 3.0, mieCoefficient: 0.04,  mieDirectionalG: 0.6,  sunPosition: [40,  20, -60]  as [number,number,number] },
+    sunny:  { turbidity: 4,  rayleigh: 0.8, mieCoefficient: 0.003, mieDirectionalG: 0.92, sunPosition: [100, 80, -100] as [number,number,number] },
+    cloudy: { turbidity: 14, rayleigh: 2.0, mieCoefficient: 0.015, mieDirectionalG: 0.72, sunPosition: [60,  45, -60]  as [number,number,number] },
+    sunset: { turbidity: 8,  rayleigh: 3.5, mieCoefficient: 0.01,  mieDirectionalG: 0.82, sunPosition: [90,  6,   -90]  as [number,number,number] },
+    night:  { turbidity: 20, rayleigh: 5.0, mieCoefficient: 0.05,  mieDirectionalG: 0.4,  sunPosition: [10,  -60, -10]  as [number,number,number] },
+    rain:   { turbidity: 14, rayleigh: 2.5, mieCoefficient: 0.02,  mieDirectionalG: 0.7,  sunPosition: [60,  30, -80]  as [number,number,number] },
+    snow:   { turbidity: 10, rayleigh: 1.5, mieCoefficient: 0.01,  mieDirectionalG: 0.8,  sunPosition: [80,  50, -60]  as [number,number,number] },
+    fog:    { turbidity: 20, rayleigh: 3.0, mieCoefficient: 0.04,  mieDirectionalG: 0.6,  sunPosition: [40,  20, -60]  as [number,number,number] },
+    storm:  { turbidity: 25, rayleigh: 4.5, mieCoefficient: 0.05,  mieDirectionalG: 0.5,  sunPosition: [30,  15, -40]  as [number,number,number] },
   };
   const sky = skyConfig[weather as keyof typeof skyConfig] ?? skyConfig.sunny;
+
+  // Ambient & hemisphere light colors and intensities matched to weather
+  const ambientIntensity = weather === 'night' ? 0.35 : weather === 'storm' ? 0.55 : weather === 'fog' ? 0.9 : weather === 'sunset' ? 1.1 : 1.4;
+  const ambientColor = weather === 'sunset' ? '#ffccaa' : weather === 'night' ? '#111530' : weather === 'storm' ? '#8899a8' : '#d4e8ff';
+  const hemisphereIntensity = weather === 'night' ? 0.4 : weather === 'storm' ? 0.6 : 1.6;
+
+  // Dynamic fog configuration based on weather
+  let fogColor = '#c8e0f5';
+  let fogNear = 500;
+  let fogFar = 2500;
+
+  if (weather === 'fog') {
+    fogColor = '#c8d8e8';
+    fogNear = 20;
+    fogFar = 180;
+  } else if (weather === 'night') {
+    fogColor = '#050714';
+    fogNear = 45;
+    fogFar = 380;
+  } else if (weather === 'storm') {
+    fogColor = '#2b303a';
+    fogNear = 35;
+    fogFar = 280;
+  } else if (weather === 'sunset') {
+    fogColor = '#e8a080';
+    fogNear = 120;
+    fogFar = 1100;
+  } else if (weather === 'rain' || weather === 'cloudy') {
+    fogColor = '#a8b8c8';
+    fogNear = 140;
+    fogFar = 1400;
+  }
 
   return (
     // !! Critical: explicit 100vw/100vh with absolute positioning ensures canvas fills viewport !!
@@ -302,18 +354,16 @@ export default function GameCanvas() {
         </SceneErrorBoundary>
 
         {/* ─── Lighting (never suspends) ─── */}
-        <ambientLight intensity={1.4} color="#d4e8ff" />
-        <hemisphereLight intensity={1.6} color="#87ceeb" groundColor="#6b8c5a" />
+        <ambientLight intensity={ambientIntensity} color={ambientColor} />
+        <hemisphereLight intensity={hemisphereIntensity} color="#87ceeb" groundColor="#6b8c5a" />
         <DynamicSun />
+        {weather === 'storm' && <Lightning />}
 
         {/* ─── Atmospheric fog ─── */}
-        {weather === 'fog'
-          ? <fog attach="fog" args={['#c8d8e8', 20, 180]} />
-          : <fog attach="fog" args={['#c8e0f5', 500, 2500]} />
-        }
+        <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
 
         {/* ─── Weather particles ─── */}
-        {weather === 'rain' && <RainParticles />}
+        {(weather === 'rain' || weather === 'storm') && <RainParticles />}
 
         {/* ─── Static environment (always renders, no asset dependencies) ─── */}
         <GroundPlane />

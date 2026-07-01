@@ -7,9 +7,10 @@ import { RigidBody } from '@react-three/rapier';
 import * as THREE from 'three';
 import { getProceduralTrackPoints } from '@/utils/trackGenerator';
 import Track from './Track';
+import { useGameStore } from '@/store/gameStore';
 
 interface SuzukaTrackProps {
-  weather?: 'sunny' | 'rain' | 'snow';
+  weather?: 'sunny' | 'rain' | 'snow' | 'fog' | 'storm';
 }
 
 // ─── Error Boundary: falls back to procedural track if GLB fails ───
@@ -34,6 +35,14 @@ class GLBErrorBoundary extends Component<{ children: ReactNode; fallback: ReactN
 // ─── GLB Scene Renderer ───
 function SuzukaModel() {
   const { scene } = useGLTF('/models/tracks/suzuka/suzukibananini.glb');
+  const setTrackLoaded = useGameStore((s) => s.setTrackLoaded);
+
+  React.useEffect(() => {
+    setTrackLoaded(true);
+    return () => {
+      setTrackLoaded(false);
+    };
+  }, [setTrackLoaded]);
 
   useMemo(() => {
     if (!scene) return;
