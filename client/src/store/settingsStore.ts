@@ -26,6 +26,12 @@ export interface SettingsState {
   uiScale: UIScale;
   activeCameraId: string;
   
+  // Calibration settings
+  neutralAngle: number;
+  leftMaxAngle: number;
+  rightMaxAngle: number;
+  isCalibrated: boolean;
+  
   // Actions
   setGraphicsQuality: (quality: GraphicsQuality) => void;
   setSoundVolume: (volume: number) => void;
@@ -43,6 +49,7 @@ export interface SettingsState {
   setWeather: (weather: GameWeather) => void;
   setUiScale: (scale: UIScale) => void;
   setActiveCameraId: (id: string) => void;
+  setCalibration: (neutral: number, left: number, right: number) => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -79,4 +86,16 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setWeather: (weather) => set({ weather }),
   setUiScale: (uiScale) => set({ uiScale }),
   setActiveCameraId: (activeCameraId) => set({ activeCameraId }),
+
+  // Calibration settings
+  neutralAngle: 0,
+  leftMaxAngle: -0.6,
+  rightMaxAngle: 0.6,
+  isCalibrated: false,
+  setCalibration: (neutral: number, left: number, right: number) => set({
+    neutralAngle: neutral,
+    leftMaxAngle: left,
+    rightMaxAngle: right,
+    isCalibrated: true
+  }),
 }));

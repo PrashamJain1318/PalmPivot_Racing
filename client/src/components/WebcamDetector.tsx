@@ -4,7 +4,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '@/store/gameStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { classifyHandGesture, Landmark } from '@/gestures/gestureClassifier';
-import { Camera, RefreshCw, AlertCircle, Settings, ChevronDown } from 'lucide-react';
+import { Camera, RefreshCw, AlertCircle, Settings, ChevronDown, MonitorPlay } from 'lucide-react';
+
+interface SmoothedPoint {
+  x: number;
+  y: number;
+}
 
 export default function WebcamDetector() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -14,17 +19,44 @@ export default function WebcamDetector() {
   const [loadingModel, setLoadingModel] = useState<boolean>(true);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
-  
+  const [showDebugPanel, setShowDebugPanel] = useState(true); // default true for dev visibility
+
+  // Settings calibration states
+  const {
+    neutralAngle,
+    leftMaxAngle,
+    rightMaxAngle,
+    isCalibrated,
+    gestureSensitivity,
+    setActiveCameraId,
+    activeCameraId,
+    handMode,
+  } = useSettingsStore();
+
   const updateGestureInput = useGameStore((s) => s.updateGestureInput);
   const setCameraPermission = useGameStore((s) => s.setCameraPermission);
-  const handMode = useSettingsStore((s) => s.handMode);
-  const activeCameraId = useSettingsStore((s) => s.activeCameraId);
-  const setActiveCameraId = useSettingsStore((s) => s.setActiveCameraId);
 
   // EMA smoothing & lost-frame recovery refs
   const smoothedSteerRef = useRef(0);
   const lostFramesRef = useRef(0);
   const lastGestureRef = useRef('neutral');
+
+  // Wrist projection history refs for one-hand lost recovery
+  const lastLeftWristRef = useRef<SmoothedPoint>({ x: 0.35, y: 0.5 });
+  const lastRightWristRef = useRef<SmoothedPoint>({ x: 0.65, y: 0.5 });
+  const lastHandDistanceRef = useRef<number>(0.3);
+  const lastRelativeAngleRef = useRef<number>(0.0);
+  const lastLeftHandRollRef = useRef<number>(0.0);
+  const lastRightHandRollRef = useRef<number>(0.0);
+  const hasTwoHandsBaselineRef = useRef<boolean>(false);
+
+  // Wrist landmark smoothing refs (jitter prevention)
+  const smoothedLeftWristRef = useRef<SmoothedPoint>({ x: 0.35, y: 0.5 });
+  const smoothedRightWristRef = useRef<SmoothedPoint>({ x: 0.65, y: 0.5 });
+
+  // Latency & frame counters
+  const sendTimeRef = useRef(0);
+  const latencyRef = useRef(0);
 
   // Enumerate video devices
   useEffect(() => {
@@ -32,9 +64,8 @@ export default function WebcamDetector() {
     const fetchDevices = async () => {
       try {
         const devs = await navigator.mediaDevices.enumerateDevices();
-        const videoDevs = devs.filter(d => d.kind === 'videoinput');
+        const videoDevs = devs.filter((d) => d.kind === 'videoinput');
         setDevices(videoDevs);
-        // Default to first camera if not set
         if (videoDevs.length > 0 && !activeCameraId) {
           setActiveCameraId(videoDevs[0].deviceId);
         }
@@ -42,8 +73,7 @@ export default function WebcamDetector() {
         console.warn('Failed to enumerate media devices:', e);
       }
     };
-    
-    // Request permission once, then enumerate
+
     if (permissionState === 'granted') {
       fetchDevices();
     }
@@ -60,9 +90,11 @@ export default function WebcamDetector() {
         if (!window) return;
         setLoadingModel(true);
 
-        // Dynamic local import to solve Next.js SSR and UMD collisions
         const mpHandsModule = await import('@mediapipe/hands');
-        const HandsClass = mpHandsModule.Hands || (mpHandsModule as any).default?.Hands || (window as any).Hands;
+        const HandsClass =
+          mpHandsModule.Hands ||
+          (mpHandsModule as any).default?.Hands ||
+          (window as any).Hands;
 
         if (!HandsClass) {
           throw new Error('Hands class constructor not found in module.');
@@ -71,14 +103,14 @@ export default function WebcamDetector() {
         if (!active) return;
 
         handsDetector = new HandsClass({
-          locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+          locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
         });
 
         handsDetector.setOptions({
           maxNumHands: 2,
           modelComplexity: 1,
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5
+          minDetectionConfidence: 0.55,
+          minTrackingConfidence: 0.55,
         });
 
         handsDetector.onResults(onResults);
@@ -96,9 +128,15 @@ export default function WebcamDetector() {
     const startCamera = async () => {
       try {
         setPermissionState('prompt');
-        
-        if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error('Webcam APIs are blocked. Please verify you are on localhost:3001 or using secure HTTPS.');
+
+        if (
+          typeof navigator === 'undefined' ||
+          !navigator.mediaDevices ||
+          !navigator.mediaDevices.getUserMedia
+        ) {
+          throw new Error(
+            'Webcam APIs are blocked. Please verify you are on localhost:3001 or using secure HTTPS.'
+          );
         }
 
         let stream: MediaStream;
@@ -107,24 +145,24 @@ export default function WebcamDetector() {
           const videoConstraints: any = {
             width: 320,
             height: 240,
-            frameRate: { ideal: 30 }
+            frameRate: { ideal: 30 },
           };
           if (activeCameraId) {
             videoConstraints.deviceId = { exact: activeCameraId };
           }
-          
+
           stream = await navigator.mediaDevices.getUserMedia({
             video: videoConstraints,
-            audio: false
+            audio: false,
           });
         } catch (deviceErr) {
           console.warn('Failed to load specific device ID, trying general camera constraints...', deviceErr);
           stream = await navigator.mediaDevices.getUserMedia({
             video: { width: 320, height: 240, frameRate: { ideal: 30 } },
-            audio: false
+            audio: false,
           });
         }
-        
+
         if (!active) {
           stream.getTracks().forEach((t) => trackStop(t));
           return;
@@ -143,7 +181,9 @@ export default function WebcamDetector() {
         console.warn('Webcam permission access denied:', err);
         setPermissionState('denied');
         setCameraPermission('denied');
-        setErrorMsg(err.message || 'Webcam access was denied. Please allow camera permissions in your browser address bar.');
+        setErrorMsg(
+          err.message || 'Webcam access was denied. Please allow camera permissions in your browser address bar.'
+        );
       }
     };
 
@@ -163,7 +203,7 @@ export default function WebcamDetector() {
           const r = data[i];
           const g = data[i + 1];
           const b = data[i + 2];
-          brightnessSum += (0.299 * r + 0.587 * g + 0.114 * b);
+          brightnessSum += 0.299 * r + 0.587 * g + 0.114 * b;
         }
         const avgLuminance = brightnessSum / (data.length / 40);
         return Math.min(100, Math.max(0, Math.round((avgLuminance / 128) * 100)));
@@ -172,7 +212,17 @@ export default function WebcamDetector() {
       }
     };
 
-    // Frame processing loop
+    // Helper: Palm roll/tilt calculator for one-hand projection
+    const getPalmRoll = (landmarks: Landmark[], isLeft: boolean): number => {
+      if (!landmarks || landmarks.length < 21) return 0;
+      const indexMCP = landmarks[5];
+      const pinkyMCP = landmarks[17];
+      const dx = pinkyMCP.x - indexMCP.x;
+      const dy = pinkyMCP.y - indexMCP.y;
+      let angle = Math.atan2(dy, dx);
+      return isLeft ? -angle : angle;
+    };
+
     let lastTime = performance.now();
     let frames = 0;
     let fps = 0;
@@ -190,12 +240,11 @@ export default function WebcamDetector() {
         }
 
         try {
+          sendTimeRef.current = performance.now();
           await handsDetector.send({ image: videoRef.current });
-        } catch (e) {
-          // Ignore transient capture errors
-        }
+        } catch (e) {}
       }
-      
+
       requestFrameId = requestAnimationFrame(processFrame);
     };
 
@@ -204,6 +253,8 @@ export default function WebcamDetector() {
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
+
+      latencyRef.current = Math.round(performance.now() - sendTimeRef.current);
 
       const w = canvas.width;
       const h = canvas.height;
@@ -218,30 +269,67 @@ export default function WebcamDetector() {
 
       const lightingScore = checkLighting(ctx, w, h);
 
-      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        // Reset lost frames counter
+      const handsPresent = results.multiHandLandmarks && results.multiHandLandmarks.length > 0;
+
+      // 1. Hands Detection and Auto-Identification
+      if (handsPresent) {
         lostFramesRef.current = 0;
 
-        // Process all detected hands (up to 2)
-        const classifications = results.multiHandLandmarks.map((landmarks: Landmark[], index: number) => {
-          const isLeftHand = results.multiHandedness[index].label === 'Left';
-          const classification = classifyHandGesture(landmarks, isLeftHand);
-          return {
-            landmarks,
-            isLeftHand,
-            gesture: classification.gesture,
-            steeringAngle: classification.steeringAngle,
-            confidence: results.multiHandedness[index].score
-          };
-        });
+        const rawClassifications = results.multiHandLandmarks.map(
+          (landmarks: Landmark[], index: number) => {
+            const isLeft = results.multiHandedness[index].label === 'Left';
+            const classification = classifyHandGesture(landmarks, isLeft);
+            return {
+              landmarks,
+              isLeft,
+              wrist: landmarks[0],
+              gesture: classification.gesture,
+              confidence: results.multiHandedness[index].score,
+            };
+          }
+        );
 
-        // Determine combined gesture
-        // Priority list for action gestures: pause > handbrake > nitro > brake > accelerate
+        // Sort screen-left and screen-right wrists by X position
+        const sortedClassifications = [...rawClassifications].sort(
+          (a, b) => a.wrist.x - b.wrist.x
+        );
+
+        let leftHandInfo = null;
+        let rightHandInfo = null;
+
+        if (sortedClassifications.length === 1) {
+          // Identify single hand based on screen position
+          const single = sortedClassifications[0];
+          if (single.wrist.x < 0.5) {
+            leftHandInfo = single;
+          } else {
+            rightHandInfo = single;
+          }
+        } else if (sortedClassifications.length >= 2) {
+          leftHandInfo = sortedClassifications[0];
+          rightHandInfo = sortedClassifications[1];
+        }
+
+        // Apply EMA Landmark smoothing to wrists (jitter removal)
+        if (leftHandInfo) {
+          smoothedLeftWristRef.current.x =
+            0.35 * leftHandInfo.wrist.x + 0.65 * smoothedLeftWristRef.current.x;
+          smoothedLeftWristRef.current.y =
+            0.35 * leftHandInfo.wrist.y + 0.65 * smoothedLeftWristRef.current.y;
+        }
+        if (rightHandInfo) {
+          smoothedRightWristRef.current.x =
+            0.35 * rightHandInfo.wrist.x + 0.65 * smoothedRightWristRef.current.x;
+          smoothedRightWristRef.current.y =
+            0.35 * rightHandInfo.wrist.y + 0.65 * smoothedRightWristRef.current.y;
+        }
+
+        // Determine combined gesture actions
         const actionPriority = ['pause', 'handbrake', 'nitro', 'brake', 'accelerate'];
         let finalGesture = 'neutral';
         let maxPriorityIndex = -1;
 
-        classifications.forEach((c: any) => {
+        rawClassifications.forEach((c: any) => {
           const pIdx = actionPriority.indexOf(c.gesture);
           if (pIdx > maxPriorityIndex) {
             maxPriorityIndex = pIdx;
@@ -249,53 +337,116 @@ export default function WebcamDetector() {
           }
         });
 
-        // If no action gesture is detected, look for steering
-        if (finalGesture === 'neutral') {
-          const steerGesture = classifications.find((c: any) => c.gesture === 'steer_left' || c.gesture === 'steer_right');
-          if (steerGesture) {
-            finalGesture = steerGesture.gesture;
+        // 2. Virtual Steering Wheel Angle Calculation
+        let combinedSteer = 0;
+        let leftHandConf = leftHandInfo ? leftHandInfo.confidence * 100 : 0;
+        let rightHandConf = rightHandInfo ? rightHandInfo.confidence * 100 : 0;
+        let currentAngle = 0;
+
+        if (leftHandInfo && rightHandInfo) {
+          // Both hands are present: Standard Steering Wheel calculation
+          const dx = smoothedRightWristRef.current.x - smoothedLeftWristRef.current.x;
+          const dy = smoothedRightWristRef.current.y - smoothedLeftWristRef.current.y;
+
+          // Clockwise tilt -> right hand goes down (dy increases) -> positive angle
+          const wheelAngle = Math.atan2(dy, dx);
+          currentAngle = wheelAngle;
+
+          // Save baseline calculations for missing-hand projections
+          lastHandDistanceRef.current = Math.sqrt(dx * dx + dy * dy);
+          lastRelativeAngleRef.current = wheelAngle;
+          lastLeftWristRef.current = { ...smoothedLeftWristRef.current };
+          lastRightWristRef.current = { ...smoothedRightWristRef.current };
+          lastLeftHandRollRef.current = getPalmRoll(leftHandInfo.landmarks, true);
+          lastRightHandRollRef.current = getPalmRoll(rightHandInfo.landmarks, false);
+          hasTwoHandsBaselineRef.current = true;
+
+          // Normalize steering angle relative to calibration settings
+          let steer = 0;
+          const relativeAngle = wheelAngle - neutralAngle;
+
+          if (relativeAngle < 0) {
+            // Steering left
+            const range = Math.abs(leftMaxAngle - neutralAngle) || 0.55;
+            steer = relativeAngle / range;
+          } else {
+            // Steering right
+            const range = Math.abs(rightMaxAngle - neutralAngle) || 0.55;
+            steer = relativeAngle / range;
+          }
+
+          // Apply deadzone around the center position (smooth thresholding)
+          if (Math.abs(steer) < 0.08) {
+            steer = 0;
+          }
+
+          combinedSteer = steer;
+        } else if (hasTwoHandsBaselineRef.current && (leftHandInfo || rightHandInfo)) {
+          // Stable tracking even when one hand briefly disappears: Wrist offset projection
+          let projectedAngle = lastRelativeAngleRef.current;
+
+          if (rightHandInfo) {
+            // Left hand disappeared: project left hand coordinates from right hand roll delta
+            const currentRoll = getPalmRoll(rightHandInfo.landmarks, false);
+            const deltaRoll = currentRoll - lastRightHandRollRef.current;
+            projectedAngle = lastRelativeAngleRef.current + deltaRoll;
+
+            const estLeftX =
+              smoothedRightWristRef.current.x - lastHandDistanceRef.current * Math.cos(projectedAngle);
+            const estLeftY =
+              smoothedRightWristRef.current.y - lastHandDistanceRef.current * Math.sin(projectedAngle);
+
+            smoothedLeftWristRef.current = { x: estLeftX, y: estLeftY };
+          } else if (leftHandInfo) {
+            // Right hand disappeared: project right hand coordinates from left hand roll delta
+            const currentRoll = getPalmRoll(leftHandInfo.landmarks, true);
+            const deltaRoll = currentRoll - lastLeftHandRollRef.current;
+            projectedAngle = lastRelativeAngleRef.current + deltaRoll;
+
+            const estRightX =
+              smoothedLeftWristRef.current.x + lastHandDistanceRef.current * Math.cos(projectedAngle);
+            const estRightY =
+              smoothedLeftWristRef.current.y + lastHandDistanceRef.current * Math.sin(projectedAngle);
+
+            smoothedRightWristRef.current = { x: estRightX, y: estRightY };
+          }
+
+          currentAngle = projectedAngle;
+          const relativeAngle = projectedAngle - neutralAngle;
+          let steer = 0;
+          if (relativeAngle < 0) {
+            const range = Math.abs(leftMaxAngle - neutralAngle) || 0.55;
+            steer = relativeAngle / range;
+          } else {
+            const range = Math.abs(rightMaxAngle - neutralAngle) || 0.55;
+            steer = relativeAngle / range;
+          }
+
+          if (Math.abs(steer) < 0.08) steer = 0;
+          combinedSteer = steer;
+        } else {
+          // Single hand startup / fallback (before two-hand baseline is established)
+          const activeHand = leftHandInfo || rightHandInfo;
+          if (activeHand) {
+            const roll = getPalmRoll(activeHand.landmarks, activeHand.isLeft);
+            currentAngle = roll;
+            let steer = roll / 0.55;
+            if (Math.abs(steer) < 0.12) steer = 0;
+            combinedSteer = steer;
           }
         }
 
-        // Determine combined steering angle (Virtual Steering Wheel)
-        let combinedSteer = 0;
-        if (classifications.length === 1) {
-          // Single hand fallback: use the roll/tilt angle
-          combinedSteer = classifications[0].steeringAngle;
-        } else if (classifications.length >= 2) {
-          // Both hands are present: calculate angle between the two wrists
-          const hand0 = classifications[0];
-          const hand1 = classifications[1];
-          
-          const wrist0 = hand0.landmarks[0];
-          const wrist1 = hand1.landmarks[0];
-          
-          // Sort left and right wrists by X coordinate in screen space
-          const leftWrist = wrist0.x < wrist1.x ? wrist0 : wrist1;
-          const rightWrist = wrist0.x < wrist1.x ? wrist1 : wrist0;
-          
-          const dx = rightWrist.x - leftWrist.x;
-          const dy = rightWrist.y - leftWrist.y;
-          
-          // Calculate angle: rotating right (clockwise) makes right hand go down (dy increases), left hand go up (dy increases)
-          const wheelAngle = Math.atan2(dy, dx);
-          
-          // Normalize: tilt of ~35 degrees (0.6 radians) represents full lock
-          let steer = wheelAngle / 0.6;
-          
-          // Deadzone
-          if (Math.abs(steer) < 0.08) steer = 0;
-          
-          combinedSteer = Math.max(-1, Math.min(1, steer));
-        }
+        // Apply adjustable sensitivity and clamp steering output between -1.0 and +1.0
+        combinedSteer = Math.max(-1.0, Math.min(1.0, combinedSteer * gestureSensitivity));
 
-        // Apply Exponential Moving Average (EMA) steering filter (smoothing = 0.28)
-        smoothedSteerRef.current = 0.28 * combinedSteer + 0.72 * smoothedSteerRef.current;
+        // Noise reduction & Jitter removal (smoothing = 0.24)
+        smoothedSteerRef.current = 0.24 * combinedSteer + 0.76 * smoothedSteerRef.current;
         lastGestureRef.current = finalGesture;
 
-        // Average confidence score
         const avgConfidence = Math.round(
-          (classifications.reduce((sum: number, c: any) => sum + c.confidence, 0) / classifications.length) * 100
+          ((leftHandInfo ? leftHandInfo.confidence : 0) +
+            (rightHandInfo ? rightHandInfo.confidence : 0)) *
+            50
         );
 
         updateGestureInput({
@@ -304,15 +455,21 @@ export default function WebcamDetector() {
           currentGesture: finalGesture,
           steeringAngle: smoothedSteerRef.current,
           webcamFps: fps,
-          webcamLighting: lightingScore
+          webcamLighting: lightingScore,
+          leftHandConfidence: Math.round(leftHandConf),
+          rightHandConfidence: Math.round(rightHandConf),
+          handsCount: sortedClassifications.length,
+          trackingLatency: latencyRef.current,
+          handsLostNotification: false,
+          rawWheelAngle: currentAngle,
         });
 
-        // Draw neon skeletal lines for all detected hands
+        // 3. Draw neon skeletal lines inside canvas
         ctx.save();
         ctx.translate(w, 0);
         ctx.scale(-1, 1);
 
-        classifications.forEach((c: any, index: number) => {
+        sortedClassifications.forEach((c: any, index: number) => {
           const landmarks = c.landmarks;
           ctx.fillStyle = index === 0 ? '#00f0ff' : '#00ffcc';
           ctx.strokeStyle = index === 0 ? '#ff0055' : '#ff3366';
@@ -336,36 +493,51 @@ export default function WebcamDetector() {
 
           for (let i = 0; i < landmarks.length; i++) {
             ctx.beginPath();
-            ctx.arc(landmarks[i].x * w, landmarks[i].y * h, 4, 0, 2 * Math.PI);
+            ctx.arc(landmarks[i].x * w, landmarks[i].y * h, 3.5, 0, 2 * Math.PI);
             ctx.fill();
           }
         });
 
         ctx.restore();
       } else {
-        // Lost Hand Recovery logic (preserve state if lost < 6 frames ~200ms)
+        // Lost Hand Recovery / Extrapolation logic
+        // If confidence drops below threshold, maintain last stable steering value (ema slow decay)
         lostFramesRef.current += 1;
-        if (lostFramesRef.current < 6) {
-          // Slow return to zero for steering angle
-          smoothedSteerRef.current = 0.82 * smoothedSteerRef.current;
-          
+
+        if (lostFramesRef.current < 16) {
+          // Slow return to neutral rather than instant snap (extrapolation)
+          smoothedSteerRef.current = 0.92 * smoothedSteerRef.current;
+
           updateGestureInput({
             handDetected: true,
-            handConfidence: 30,
+            handConfidence: 20,
             currentGesture: lastGestureRef.current,
             steeringAngle: smoothedSteerRef.current,
             webcamFps: fps,
-            webcamLighting: lightingScore
+            webcamLighting: lightingScore,
+            leftHandConfidence: 0,
+            rightHandConfidence: 0,
+            handsCount: 0,
+            trackingLatency: latencyRef.current,
+            handsLostNotification: false,
           });
         } else {
+          // Exceeded timeout (approx 500ms): safely reset to zero and trigger overlay notification
           smoothedSteerRef.current = 0;
+          hasTwoHandsBaselineRef.current = false;
+
           updateGestureInput({
             handDetected: false,
             handConfidence: 0,
             currentGesture: 'neutral',
             steeringAngle: 0,
             webcamFps: fps,
-            webcamLighting: lightingScore
+            webcamLighting: lightingScore,
+            leftHandConfidence: 0,
+            rightHandConfidence: 0,
+            handsCount: 0,
+            trackingLatency: latencyRef.current,
+            handsLostNotification: true, // Display warning popup
           });
         }
       }
@@ -387,26 +559,30 @@ export default function WebcamDetector() {
         handsDetector.close();
       }
     };
-  }, [handMode, activeCameraId, updateGestureInput]);
+  }, [handMode, activeCameraId, updateGestureInput, neutralAngle, leftMaxAngle, rightMaxAngle, gestureSensitivity]);
+
+  // Telemetry properties from the store
+  const {
+    handDetected,
+    handConfidence,
+    currentGesture,
+    steeringAngle,
+    webcamFps,
+    webcamLighting,
+    leftHandConfidence,
+    rightHandConfidence,
+    handsCount,
+    trackingLatency,
+  } = useGameStore();
+
+  const isDev = process.env.NODE_ENV !== 'production';
 
   return (
     <div className="relative w-full aspect-video rounded-2xl border border-white/10 bg-black/40 overflow-hidden backdrop-blur-md shadow-2xl flex flex-col items-center justify-center">
-      <video
-        ref={videoRef}
-        className="hidden"
-        playsInline
-        muted
-        width={320}
-        height={240}
-      />
-      <canvas
-        ref={canvasRef}
-        width={320}
-        height={240}
-        className="absolute inset-0 w-full h-full object-cover rounded-2xl"
-      />
+      <video ref={videoRef} className="hidden" playsInline muted width={320} height={240} />
+      <canvas ref={canvasRef} width={320} height={240} className="absolute inset-0 w-full h-full object-cover rounded-2xl" />
 
-      {/* Floating Camera Device Switcher */}
+      {/* Camera switcher */}
       {permissionState === 'granted' && devices.length > 1 && (
         <div className="absolute top-2 right-2 z-30 pointer-events-auto">
           <button
@@ -415,7 +591,7 @@ export default function WebcamDetector() {
           >
             <Settings className="w-3.5 h-3.5" /> CAMERA <ChevronDown className="w-3 h-3" />
           </button>
-          
+
           {showDropdown && (
             <div className="absolute right-0 mt-1.5 w-44 bg-black/90 border border-white/10 rounded-lg shadow-xl py-1 flex flex-col text-[10px]">
               {devices.map((d) => (
@@ -437,7 +613,73 @@ export default function WebcamDetector() {
         </div>
       )}
 
-      {/* States Overlays */}
+      {/* Debug panel toggle (dev mode only) */}
+      {isDev && permissionState === 'granted' && !loadingModel && (
+        <button
+          onClick={() => setShowDebugPanel(!showDebugPanel)}
+          className="absolute bottom-2 left-2 z-30 pointer-events-auto p-1.5 bg-black/80 border border-white/15 rounded-lg text-white/60 hover:text-white transition"
+          title="Toggle CV Telemetry Panel"
+        >
+          <MonitorPlay className="w-4 h-4" />
+        </button>
+      )}
+
+      {/* ─── LIVE CV TELEMETRY DEBUG PANEL (Dev Mode only) ─── */}
+      {isDev && showDebugPanel && permissionState === 'granted' && !loadingModel && (
+        <div className="absolute bottom-1 right-1 left-1 bg-black/80 border border-white/10 rounded-xl p-2.5 font-mono text-[8px] text-white/70 backdrop-blur-md grid grid-cols-2 gap-x-3 gap-y-1 z-35 pointer-events-none select-none">
+          <div className="flex justify-between">
+            <span>CAM:</span>
+            <span className="text-emerald-400 font-bold">CONNECTED</span>
+          </div>
+          <div className="flex justify-between">
+            <span>FPS:</span>
+            <span className="text-white">{webcamFps} FPS</span>
+          </div>
+          <div className="flex justify-between">
+            <span>TRACKING:</span>
+            <span className={handDetected ? 'text-emerald-400' : 'text-red-400'}>
+              {handDetected ? 'DETECTED' : 'LOST'}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span>HANDS COUNT:</span>
+            <span className="text-cyan-400">{handsCount}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>L HAND CONF:</span>
+            <span className="text-white">{leftHandConfidence}%</span>
+          </div>
+          <div className="flex justify-between">
+            <span>R HAND CONF:</span>
+            <span className="text-white">{rightHandConfidence}%</span>
+          </div>
+          <div className="flex justify-between col-span-2 border-t border-white/5 pt-1 mt-1">
+            <span>WHEEL ANGLE:</span>
+            <span className="text-yellow-400 font-bold">
+              {neutralAngle ? `${(steeringAngle * 35).toFixed(1)}°` : '0°'}
+            </span>
+          </div>
+          <div className="flex justify-between col-span-2">
+            <span>STEER VALUE:</span>
+            <span className="text-cyan-400 font-bold">
+              {steeringAngle > 0 ? '+' : ''}
+              {Math.round(steeringAngle * 100)}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span>LATENCY:</span>
+            <span className="text-white">{trackingLatency}ms</span>
+          </div>
+          <div className="flex justify-between">
+            <span>CALIB:</span>
+            <span className={isCalibrated ? 'text-emerald-400' : 'text-amber-400'}>
+              {isCalibrated ? 'CALIBRATED' : 'DEFAULT'}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Loading state */}
       {loadingModel && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-20">
           <RefreshCw className="w-8 h-8 text-cyan-400 animate-spin mb-3" />
@@ -447,6 +689,7 @@ export default function WebcamDetector() {
         </div>
       )}
 
+      {/* Camera permission prompt */}
       {permissionState === 'prompt' && !loadingModel && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 z-10 p-4 text-center">
           <Camera className="w-10 h-10 text-cyan-400 mb-3 animate-bounce" />
@@ -457,6 +700,7 @@ export default function WebcamDetector() {
         </div>
       )}
 
+      {/* Camera blocked */}
       {permissionState === 'denied' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-red-950/80 border border-red-500/30 z-10 p-4 text-center">
           <AlertCircle className="w-8 h-8 text-red-500 mb-2" />

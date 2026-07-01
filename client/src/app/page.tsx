@@ -258,11 +258,7 @@ export default function Home() {
   const handleStartRace = () => {
     synthSound('click');
     resetRaceStats(); // Always reset stats before starting a new race!
-    if (cameraPermission !== 'granted') {
-      setTriggerCameraPrompt(true);
-    } else {
-      setStatus('countdown');
-    }
+    setActiveTab('calibration');
   };
 
   // Luxury white glass card configurations
@@ -656,7 +652,10 @@ export default function Home() {
                         <h2 className="text-base font-bold uppercase tracking-wider text-[#00CFFF]">Hand Calibration</h2>
                         <button onClick={() => { synthSound('click'); setActiveTab('menu'); }} className="text-xs text-slate-400 hover:text-slate-600 uppercase">Close</button>
                       </div>
-                      <GestureCalibrator />
+                      <GestureCalibrator onComplete={() => {
+                        setStatus('countdown');
+                        setActiveTab('menu');
+                      }} />
                     </div>
                   )}
 

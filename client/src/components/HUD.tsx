@@ -106,7 +106,7 @@ export default function HUD() {
     coinsCollected, distance, score, scoreMultiplier,
     shieldActive, currentGesture, handDetected,
     handConfidence, steeringAngle, webcamLighting,
-    playerPosition, currentTrack, status,
+    playerPosition, currentTrack, status, handsLostNotification,
   } = useGameStore();
 
   const { cameraMode, setCameraMode } = useSettingsStore();
@@ -372,6 +372,21 @@ export default function HUD() {
               <span className="text-[9px] font-black text-amber-400 uppercase tracking-wide animate-pulse">WARP</span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ══ HANDS LOST OVERLAY WARNING ══ */}
+      {handsLostNotification && (
+        <div className="absolute inset-0 flex items-center justify-center bg-red-950/20 backdrop-blur-[2px] z-50">
+          <div className="bg-red-600 border border-red-500 rounded-3xl px-8 py-5 flex flex-col items-center gap-2 shadow-[0_0_50px_rgba(239,68,68,0.6)] animate-pulse max-w-sm text-center">
+            <span className="text-4xl animate-bounce">🤲</span>
+            <h2 className="text-white font-black text-lg uppercase tracking-widest leading-none mt-2">
+              HANDS LOST
+            </h2>
+            <p className="text-white/80 text-[10px] font-mono leading-relaxed">
+              Place both hands in front of the camera to resume virtual steering!
+            </p>
+          </div>
         </div>
       )}
     </div>

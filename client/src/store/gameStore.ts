@@ -73,6 +73,12 @@ export interface GameState {
   webcamLighting: number; // 0-100 index for lighting quality
   cameraPermission: 'prompt' | 'granted' | 'denied';
   playerPosition: [number, number]; // [x, z] for minimap
+  leftHandConfidence: number;
+  rightHandConfidence: number;
+  handsCount: number;
+  trackingLatency: number;
+  handsLostNotification: boolean;
+  rawWheelAngle: number;
   
   // Upgrades features
   achievements: string[];
@@ -84,7 +90,7 @@ export interface GameState {
   setTrack: (trackId: string) => void;
   setCar: (carId: string) => void;
   updateVehicleStats: (stats: Partial<Pick<GameState, 'speed' | 'rpm' | 'gear' | 'nitroLevel' | 'nitroActive' | 'lap' | 'raceTime' | 'health' | 'combo' | 'driftTime' | 'isDrifting' | 'playerPosition' | 'fuel' | 'coinsCollected' | 'distance' | 'score' | 'scoreMultiplier' | 'shieldActive' | 'magnetActive'>>) => void;
-  updateGestureInput: (input: Partial<Pick<GameState, 'handDetected' | 'handConfidence' | 'currentGesture' | 'steeringAngle' | 'webcamFps' | 'webcamLighting' | 'cameraPermission'>>) => void;
+  updateGestureInput: (input: Partial<Pick<GameState, 'handDetected' | 'handConfidence' | 'currentGesture' | 'steeringAngle' | 'webcamFps' | 'webcamLighting' | 'cameraPermission' | 'leftHandConfidence' | 'rightHandConfidence' | 'handsCount' | 'trackingLatency' | 'handsLostNotification' | 'rawWheelAngle'>>) => void;
   setCameraPermission: (perm: 'prompt' | 'granted' | 'denied') => void;
   addCoins: (amount: number) => void;
   addDiamonds: (amount: number) => void;
@@ -164,6 +170,12 @@ export const useGameStore = create<GameState>((set, get) => ({
   webcamLighting: 100,
   cameraPermission: 'prompt',
   playerPosition: [0, 0],
+  leftHandConfidence: 0,
+  rightHandConfidence: 0,
+  handsCount: 0,
+  trackingLatency: 0,
+  handsLostNotification: false,
+  rawWheelAngle: 0,
 
   achievements: [],
   dailyChallenges: [...DEFAULT_CHALLENGES],
@@ -305,7 +317,13 @@ export const useGameStore = create<GameState>((set, get) => ({
     score: 0,
     scoreMultiplier: 1,
     shieldActive: false,
-    magnetActive: false
+    magnetActive: false,
+    leftHandConfidence: 0,
+    rightHandConfidence: 0,
+    handsCount: 0,
+    trackingLatency: 0,
+    handsLostNotification: false,
+    rawWheelAngle: 0
   }),
 
   resetRaceStats: () => set({
@@ -327,6 +345,12 @@ export const useGameStore = create<GameState>((set, get) => ({
     score: 0,
     scoreMultiplier: 1,
     shieldActive: false,
-    magnetActive: false
+    magnetActive: false,
+    leftHandConfidence: 0,
+    rightHandConfidence: 0,
+    handsCount: 0,
+    trackingLatency: 0,
+    handsLostNotification: false,
+    rawWheelAngle: 0
   })
 }));
